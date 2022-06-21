@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  <entry>
+    <title>Hello World</title>
+    <url>/2022/06/20/hello-world/</url>
+    <content><![CDATA[]]></content>
+      <categories>
+        <category>Hello World</category>
+      </categories>
+      <tags>
+        <tag>Hello World</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Flask 项目使用 cloudinary 全纪录</title>
+    <url>/2022/06/21/text1/</url>
+    <content><![CDATA[<h1 id="Flask-项目使用-cloudinary-全纪录"><a href="#Flask-项目使用-cloudinary-全纪录" class="headerlink" title="Flask 项目使用 cloudinary 全纪录"></a>Flask 项目使用 cloudinary 全纪录</h1><blockquote>
+<p>写在前面，由于在Heorku上运行程序过程中创建的文件将不会永久保存，而且会在一天内被重置。即用户上传的文件无法像在本地一样保存在服务器端的文件夹。因此将媒体文件保存在cloudinary（类似七牛云）。</p>
+<p>如果要直接使用heroku的cloudinary插件需要绑定海外的信用卡🙂，所以直接嵌入源代码。</p>
+<img src="https://cdn.jsdelivr.net/gh/chichengfengxue/picture_bed/image-20220619191706357-16557053770481.png" alt="image-20220619191706357" style="zoom: 33%;" />
+
+<p><a href="https://github.com/chichengfengxue/flask-youguoqi">项目地址</a></p>
+<p><a href="https://flask-youguoqi.herokuapp.com/">部署地址</a></p>
+</blockquote>
+<h3 id=""><a href="#" class="headerlink" title=""></a></h3><h3 id="配置"><a href="#配置" class="headerlink" title="配置"></a>配置</h3><blockquote>
+<p>我是写在<code>.env</code>文件里面，在heroku需要手动设置</p>
+</blockquote>
+<p><img src="https://cdn.jsdelivr.net/gh/chichengfengxue/picture_bed/image-20220620141804054.png" alt="image-20220620141804054"></p>
+<figure class="highlight shell"><table><tr><td class="code"><pre><span class="line"><span class="meta">#</span><span class="bash"> 在cloudinary主页的控制台</span></span><br><span class="line">CLOUD_NAME=****</span><br><span class="line">API_KEY=****</span><br><span class="line">API_SECRET=****</span><br><span class="line">CLOUDINARY_URL=****</span><br><span class="line"><span class="meta">#</span><span class="bash"> 记得大写</span></span><br></pre></td></tr></table></figure>
+
+<figure class="highlight shell"><table><tr><td class="code"><pre><span class="line">heroku config:set API_KEY=**** </span><br></pre></td></tr></table></figure>
+
+
+
+<h3 id="一些基本操作"><a href="#一些基本操作" class="headerlink" title="一些基本操作"></a>一些基本操作</h3><figure class="highlight python"><table><tr><td class="code"><pre><span class="line">cors = CORS()  <span class="comment"># flask-cors用于跨域</span></span><br><span class="line">cors.init_app(app)</span><br><span class="line"><span class="meta">@cross_origin()</span></span><br></pre></td></tr></table></figure>
+
+
+
+
+
+<h3 id="具体实现"><a href="#具体实现" class="headerlink" title="具体实现"></a>具体实现</h3><figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> cloudinary</span><br><span class="line"><span class="keyword">from</span> cloudinary.uploader <span class="keyword">import</span> upload</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">upload_cloudinary</span>(<span class="params">file_to_upload</span>):</span></span><br><span class="line">    <span class="string">&quot;&quot;&quot;上传函数&quot;&quot;&quot;</span></span><br><span class="line">    cloudinary.config(</span><br><span class="line">        cloud_name=os.getenv(<span class="string">&#x27;CLOUD_NAME&#x27;</span>),</span><br><span class="line">        api_key=os.getenv(<span class="string">&#x27;API_KEY&#x27;</span>),</span><br><span class="line">        api_secret=os.getenv(<span class="string">&#x27;API_SECRET&#x27;</span>))</span><br><span class="line">    </span><br><span class="line">    <span class="comment"># cloudinary.uploader.upload 传入文件流或本地文件名</span></span><br><span class="line">    <span class="comment"># 设置resource_type=&quot;auto&quot; 可以上传任意格式文件</span></span><br><span class="line">    upload_result = upload(file_to_upload, resource_type=<span class="string">&quot;auto&quot;</span>)</span><br><span class="line">    </span><br><span class="line">    <span class="comment"># 返回上传结果 url 和文件类型</span></span><br><span class="line">    <span class="keyword">return</span> upload_result[<span class="string">&#x27;url&#x27;</span>], upload_result[<span class="string">&#x27;format&#x27;</span>]</span><br></pre></td></tr></table></figure>
+
+
+
+
+
+
+
+<h3 id="参考链接"><a href="#参考链接" class="headerlink" title="参考链接"></a>参考链接</h3><blockquote>
+<p><a href="https://devcenter.heroku.com/articles/cloudinary">https://devcenter.heroku.com/articles/cloudinary</a></p>
+<p><a href="https://cloudinary.com/documentation/django_image_and_video_upload#:~:text=Python%20image%20and%20video%20upload%20Cloudinary%20provides%20an,the%20cloud%20with%20secure%20backups%20and%20revision%20history.">Python image and video upload</a></p>
+<p><a href="https://blog.csdn.net/dfsgwe1231/article/details/105993907?ops_request_misc=%257B%2522request%255Fid%2522%253A%2522165563387716782391851991%2522%252C%2522scm%2522%253A%252220140713.130102334..%2522%257D&request_id=165563387716782391851991&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~all~baidu_landing_v2~default-4-105993907-null-null.142%5Ev17%5Epc_search_result_control_group,157%5Ev15%5Enew_3&utm_term=cloudinary&spm=1018.2226.3001.4187">Cloudinary Upload API简介：轻松替代AWS S3</a></p>
+<p><strong><a href="https://github.com/tiagocordeiro/flask-cloudinary">flask-cloudinary</a></strong>  </p>
+<p><strong><a href="https://github.com/cloudinary/pycloudinary/tree/master/samples/basic">官方示例项目pycloudinary</a></strong>  </p>
+</blockquote>
+]]></content>
+      <categories>
+        <category>flask</category>
+        <category>python</category>
+      </categories>
+      <tags>
+        <tag>flask</tag>
+      </tags>
+  </entry>
+</search>
