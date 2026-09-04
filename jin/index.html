@@ -6,1978 +6,1187 @@
 <title>Love</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#050208}
+html,body{
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#07040d;
+}
 body{
     background:
-    radial-gradient(circle at 50% 39%,rgba(77,20,67,.20) 0%,rgba(20,6,25,.10) 35%,rgba(5,2,8,0) 68%),
-    #050208
+        radial-gradient(circle at 50% 36%,rgba(76,31,68,.26) 0%,rgba(24,10,31,.15) 34%,rgba(7,4,13,0) 67%),
+        #07040d;
 }
-canvas{position:fixed;inset:0;display:block;width:100%;height:100%}
-#loading{
-    position:fixed;inset:0;z-index:100;
-    display:flex;align-items:center;justify-content:center;
-    background:#050208;color:rgba(255,185,224,.5);
-    font:10px Arial,sans-serif;letter-spacing:7px;
-    transition:opacity 1s ease;pointer-events:none
+#canvas{
+    position:fixed;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
 }
-#loading.hide{opacity:0}
 .home{
-    position:fixed;left:24px;top:22px;z-index:20;
-    color:rgba(255,220,240,.28);
-    text-decoration:none;font:10px Arial,sans-serif;
-    letter-spacing:3px;transition:.35s
+    position:fixed;
+    top:22px;
+    left:24px;
+    z-index:10;
+    color:rgba(255,220,240,.25);
+    text-decoration:none;
+    font:10px Arial,sans-serif;
+    letter-spacing:3px;
+    transition:.35s;
 }
-.home:hover{color:#ffe1f3;text-shadow:0 0 15px rgba(255,100,190,.8)}
+.home:hover{
+    color:#ffe4f4;
+    text-shadow:0 0 14px rgba(255,126,203,.8);
+}
 </style>
-<script type="importmap">
-{
-    "imports":{
-        "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-    }
-}
-</script>
 </head>
 <body>
-<a href="/" class="home">HOME</a>
-<div id="loading">LOVE</div>
 
-<script type="module">
-import * as THREE from "three";
-import {EffectComposer} from "three/addons/postprocessing/EffectComposer.js";
-import {RenderPass} from "three/addons/postprocessing/RenderPass.js";
-import {UnrealBloomPass} from "three/addons/postprocessing/UnrealBloomPass.js";
-import {OutputPass} from "three/addons/postprocessing/OutputPass.js";
+<a class="home" href="/">HOME</a>
+<canvas id="canvas"></canvas>
 
-const MOBILE=innerWidth<768;
-const DPR=Math.min(devicePixelRatio||1,MOBILE?1.35:1.75);
+<script>
+(() => {
+"use strict";
 
-const COUNT={
-    heart:MOBILE?24000:52000,
-    inside:MOBILE?2200:5200,
-    sparks:MOBILE?3500:9000,
-    fountain:MOBILE?800:1900,
-    stars:MOBILE?900:2200,
-    rays:MOBILE?70:170
-};
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d",{alpha:false});
 
-const scene=new THREE.Scene();
-scene.background=new THREE.Color(0x050208);
-scene.fog=new THREE.FogExp2(0x050208,.012);
+let W=0;
+let H=0;
+let DPR=1;
 
-const camera=new THREE.PerspectiveCamera(
-    MOBILE?54:47,
-    innerWidth/innerHeight,
-    .1,
-    150
-);
+const TAU=Math.PI*2;
+const CURVE_N=4096;
 
-camera.position.set(0,2.5,MOBILE?41:37.5);
+const curveX=new Float32Array(CURVE_N);
+const curveY=new Float32Array(CURVE_N);
+const curveNX=new Float32Array(CURVE_N);
+const curveNY=new Float32Array(CURVE_N);
 
-const renderer=new THREE.WebGLRenderer({
-    antialias:false,
-    powerPreference:"high-performance"
-});
+let tinyParticles=[];
+let softParticles=[];
+let hotParticles=[];
+let innerParticles=[];
+let rays=[];
+let stars=[];
+let streamParticles=[];
 
-renderer.setPixelRatio(DPR);
-renderer.setSize(innerWidth,innerHeight);
-renderer.outputColorSpace=THREE.SRGBColorSpace;
-renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.10;
-document.body.appendChild(renderer.domElement);
+let glowPink;
+let glowWhite;
+let glowTiny;
 
-const composer=new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene,camera));
+let mouseX=0;
+let mouseY=0;
+let targetMouseX=0;
+let targetMouseY=0;
 
-const bloom=new UnrealBloomPass(
-    new THREE.Vector2(innerWidth,innerHeight),
-    1.28,
-    .62,
-    .16
-);
-
-bloom.threshold=.12;
-bloom.strength=MOBILE?1.05:1.25;
-bloom.radius=.70;
-
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
-
-const heartGroup=new THREE.Group();
-heartGroup.position.y=3.25;
-scene.add(heartGroup);
-
-const HEART_SCALE=.61;
-
-const commonHeartFunctions=`
-#define PI 3.141592653589793
-#define TAU 6.283185307179586
-
-vec2 heart(float t){
-    float s=sin(t);
-    float x=16.0*s*s*s;
-    float y=
-        13.0*cos(t)
-        -5.0*cos(2.0*t)
-        -2.0*cos(3.0*t)
-        -cos(4.0*t);
-
-    return vec2(x,y)*${HEART_SCALE.toFixed(4)};
+function rand(a,b){
+    return a+Math.random()*(b-a);
 }
 
-vec2 heartDerivative(float t){
-    float s=sin(t);
-    float c=cos(t);
-
-    float dx=48.0*s*s*c;
-
-    float dy=
-        -13.0*sin(t)
-        +10.0*sin(2.0*t)
-        +6.0*sin(3.0*t)
-        +4.0*sin(4.0*t);
-
-    return vec2(dx,dy)*${HEART_SCALE.toFixed(4)};
+function gaussian(){
+    return (Math.random()+Math.random()+Math.random()+Math.random()-2);
 }
-`;
 
-function createHeartParticles(){
+function heart(t){
+    const s=Math.sin(t);
+    const x=16*s*s*s;
+    const y=
+        13*Math.cos(t)
+        -5*Math.cos(2*t)
+        -2*Math.cos(3*t)
+        -Math.cos(4*t);
+    return [x,-y];
+}
 
-    const n=COUNT.heart;
-
-    const geometry=new THREE.BufferGeometry();
-
-    const position=new Float32Array(n*3);
-    const angle=new Float32Array(n);
-    const band=new Float32Array(n);
-    const z=new Float32Array(n);
-    const size=new Float32Array(n);
-    const seed=new Float32Array(n);
-    const speed=new Float32Array(n);
-    const bright=new Float32Array(n);
-
-    for(let i=0;i<n;i++){
-
-        angle[i]=Math.random()*Math.PI*2;
-
-        const r=Math.random();
-
-        if(r<.70){
-            band[i]=(Math.random()-.5)*.80;
-        }else if(r<.93){
-            band[i]=(Math.random()-.5)*1.55;
-        }else{
-            band[i]=(Math.random()-.5)*2.6;
-        }
-
-        z[i]=(Math.random()-.5)*(r<.9?1.65:3.4);
-
-        const q=Math.random();
-
-        if(q<.82){
-            size[i]=.40+Math.random()*.50;
-        }else if(q<.975){
-            size[i]=.85+Math.random()*.55;
-        }else{
-            size[i]=1.35+Math.random()*.75;
-        }
-
-        seed[i]=Math.random();
-
-        speed[i]=
-            .020+
-            Math.random()*.026;
-
-        bright[i]=Math.random();
-
+function buildCurve(){
+    for(let i=0;i<CURVE_N;i++){
+        const t=i/CURVE_N*TAU;
+        const p=heart(t);
+        curveX[i]=p[0];
+        curveY[i]=p[1];
     }
 
-    geometry.setAttribute("position",new THREE.BufferAttribute(position,3));
-    geometry.setAttribute("aAngle",new THREE.BufferAttribute(angle,1));
-    geometry.setAttribute("aBand",new THREE.BufferAttribute(band,1));
-    geometry.setAttribute("aZ",new THREE.BufferAttribute(z,1));
-    geometry.setAttribute("aSize",new THREE.BufferAttribute(size,1));
-    geometry.setAttribute("aSeed",new THREE.BufferAttribute(seed,1));
-    geometry.setAttribute("aSpeed",new THREE.BufferAttribute(speed,1));
-    geometry.setAttribute("aBright",new THREE.BufferAttribute(bright,1));
+    for(let i=0;i<CURVE_N;i++){
+        const prev=(i-2+CURVE_N)%CURVE_N;
+        const next=(i+2)%CURVE_N;
 
-    const vertex=`
-    ${commonHeartFunctions}
+        const dx=curveX[next]-curveX[prev];
+        const dy=curveY[next]-curveY[prev];
 
-    attribute float aAngle;
-    attribute float aBand;
-    attribute float aZ;
-    attribute float aSize;
-    attribute float aSeed;
-    attribute float aSpeed;
-    attribute float aBright;
+        const len=Math.sqrt(dx*dx+dy*dy)||1;
 
-    uniform float uTime;
-    uniform float uBeat;
-    uniform float uPixelRatio;
-    uniform float uSizeMul;
-
-    varying vec3 vColor;
-    varying float vAlpha;
-
-    void main(){
-
-        float t=
-            aAngle+
-            uTime*aSpeed;
-
-        vec2 hp=heart(t);
-
-        vec2 derivative=
-            heartDerivative(t);
-
-        vec2 tangent=
-            normalize(derivative);
-
-        vec2 normal=
-            vec2(-tangent.y,tangent.x);
-
-        float turbulence=
-            sin(
-                t*11.0+
-                uTime*.72+
-                aSeed*19.0
-            )*.085;
-
-        turbulence+=
-            sin(
-                t*23.0-
-                uTime*.43+
-                aSeed*31.0
-            )*.035;
-
-        float widthPulse=
-            1.0+
-            sin(
-                t*5.0+
-                uTime*.45+
-                aSeed*15.0
-            )*.045;
-
-        vec2 p2=
-            hp+
-            normal*
-            (
-                aBand*widthPulse+
-                turbulence
-            );
-
-        float breath=
-            1.0+
-            sin(uTime*.72)*.006+
-            uBeat*.024;
-
-        p2*=breath;
-
-        float zz=
-            aZ+
-            sin(
-                uTime*.65+
-                t*4.0+
-                aSeed*12.0
-            )*.12;
-
-        vec3 p=
-            vec3(
-                p2.x,
-                p2.y,
-                zz
-            );
-
-        vec4 mv=
-            modelViewMatrix*
-            vec4(p,1.0);
-
-        float perspective=
-            78.0/
-            max(8.0,-mv.z);
-
-        float hot=
-            smoothstep(.91,1.0,aBright);
-
-        hot+=
-            exp(
-                -p2.x*p2.x*.55
-                -(p2.y-3.3)*(p2.y-3.3)*.40
-            )*.75;
-
-        hot+=
-            exp(
-                -p2.x*p2.x*.55
-                -(p2.y+9.0)*(p2.y+9.0)*.50
-            )*.35;
-
-        hot=clamp(hot,0.0,1.0);
-
-        gl_PointSize=
-            clamp(
-                aSize*
-                uSizeMul*
-                uPixelRatio*
-                perspective,
-                .45,
-                7.0
-            );
-
-        gl_Position=
-            projectionMatrix*mv;
-
-        vec3 purple=
-            vec3(.68,.18,.62);
-
-        vec3 pink=
-            vec3(1.0,.35,.70);
-
-        vec3 pale=
-            vec3(1.0,.72,.88);
-
-        vec3 white=
-            vec3(1.0,.98,1.0);
-
-        float colorNoise=
-            .5+
-            .5*sin(aSeed*17.0);
-
-        vec3 c=
-            mix(
-                purple,
-                pink,
-                .55+
-                colorNoise*.25
-            );
-
-        c=mix(
-            c,
-            pale,
-            hot*.70
-        );
-
-        c=mix(
-            c,
-            white,
-            pow(hot,3.0)
-        );
-
-        float shimmer=
-            .74+
-            .26*sin(
-                uTime*
-                (1.8+aSeed*2.0)+
-                aSeed*35.0
-            );
-
-        vColor=c;
-
-        vAlpha=
-            (
-                .42+
-                hot*.58
-            )*
-            shimmer;
+        curveNX[i]=-dy/len;
+        curveNY[i]=dx/len;
     }
-    `;
+}
 
-    const fragment=`
-    precision highp float;
+function sampleCurve(u){
+    u=((u%1)+1)%1;
 
-    varying vec3 vColor;
-    varying float vAlpha;
-
-    uniform float uSoft;
-
-    void main(){
-
-        vec2 uv=
-            gl_PointCoord-
-            .5;
-
-        float d=
-            length(uv);
-
-        if(d>.5)discard;
-
-        float core=
-            exp(
-                -d*d*42.0
-            );
-
-        float halo=
-            exp(
-                -d*d*10.0
-            );
-
-        float alpha=
-            mix(
-                core,
-                halo,
-                uSoft
-            )*
-            vAlpha;
-
-        gl_FragColor=
-            vec4(
-                vColor,
-                alpha
-            );
-    }
-    `;
-
-    function material(sizeMul,alpha,soft){
-
-        return new THREE.ShaderMaterial({
-            vertexShader:vertex,
-            fragmentShader:fragment,
-
-            uniforms:{
-                uTime:{value:0},
-                uBeat:{value:0},
-                uPixelRatio:{value:DPR},
-                uSizeMul:{value:sizeMul},
-                uSoft:{value:soft}
-            },
-
-            transparent:true,
-            depthWrite:false,
-            depthTest:true,
-            blending:THREE.AdditiveBlending
-        });
-
-    }
-
-    const haloMaterial=
-        material(
-            3.6,
-            .05,
-            1
-        );
-
-    const bodyMaterial=
-        material(
-            1.0,
-            1,
-            .15
-        );
-
-    const halo=
-        new THREE.Points(
-            geometry,
-            haloMaterial
-        );
-
-    const body=
-        new THREE.Points(
-            geometry,
-            bodyMaterial
-        );
-
-    halo.frustumCulled=false;
-    body.frustumCulled=false;
-
-    halo.material.opacity=.08;
-
-    heartGroup.add(halo);
-    heartGroup.add(body);
+    const f=u*CURVE_N;
+    const i0=Math.floor(f)%CURVE_N;
+    const i1=(i0+1)%CURVE_N;
+    const a=f-Math.floor(f);
 
     return {
-        bodyMaterial,
-        haloMaterial
+        x:curveX[i0]+(curveX[i1]-curveX[i0])*a,
+        y:curveY[i0]+(curveY[i1]-curveY[i0])*a,
+        nx:curveNX[i0]+(curveNX[i1]-curveNX[i0])*a,
+        ny:curveNY[i0]+(curveNY[i1]-curveNY[i0])*a
     };
 }
 
-const heartParticles=
-    createHeartParticles();
+function makeSprite(size,inner,mid){
+    const c=document.createElement("canvas");
+    c.width=c.height=size;
 
-function createInnerDust(){
+    const g=c.getContext("2d");
+    const r=size*.5;
 
-    const n=COUNT.inside;
+    const gradient=g.createRadialGradient(r,r,0,r,r,r);
 
-    const geometry=
-        new THREE.BufferGeometry();
+    gradient.addColorStop(0,inner);
+    gradient.addColorStop(.09,inner);
+    gradient.addColorStop(.23,mid);
+    gradient.addColorStop(.55,"rgba(255,110,200,.12)");
+    gradient.addColorStop(1,"rgba(255,80,190,0)");
 
-    const position=
-        new Float32Array(n*3);
+    g.fillStyle=gradient;
+    g.fillRect(0,0,size,size);
 
-    const size=
-        new Float32Array(n);
-
-    const seed=
-        new Float32Array(n);
-
-    for(let i=0;i<n;i++){
-
-        const t=
-            Math.random()*
-            Math.PI*2;
-
-        const s=Math.sin(t);
-
-        const hx=
-            16*s*s*s*
-            HEART_SCALE;
-
-        const hy=
-            (
-                13*Math.cos(t)
-                -5*Math.cos(2*t)
-                -2*Math.cos(3*t)
-                -Math.cos(4*t)
-            )*
-            HEART_SCALE;
-
-        const radius=
-            Math.pow(
-                Math.random(),
-                .55
-            )*.80;
-
-        position[i*3]=
-            hx*radius+
-            (Math.random()-.5)*.22;
-
-        position[i*3+1]=
-            hy*radius+
-            (Math.random()-.5)*.22;
-
-        position[i*3+2]=
-            (Math.random()-.5)*3.0;
-
-        size[i]=
-            .35+
-            Math.random()*.85;
-
-        seed[i]=
-            Math.random();
-    }
-
-    geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            position,
-            3
-        )
-    );
-
-    geometry.setAttribute(
-        "aSize",
-        new THREE.BufferAttribute(
-            size,
-            1
-        )
-    );
-
-    geometry.setAttribute(
-        "aSeed",
-        new THREE.BufferAttribute(
-            seed,
-            1
-        )
-    );
-
-    const vertex=`
-    attribute float aSize;
-    attribute float aSeed;
-
-    uniform float uTime;
-    uniform float uPixelRatio;
-
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main(){
-
-        vec3 p=position;
-
-        p.x+=
-            sin(
-                uTime*.32+
-                p.y*.8+
-                aSeed*20.0
-            )*.055;
-
-        p.y+=
-            cos(
-                uTime*.28+
-                p.x*.6+
-                aSeed*16.0
-            )*.05;
-
-        p.z+=
-            sin(
-                uTime*.42+
-                aSeed*17.0
-            )*.08;
-
-        vec4 mv=
-            modelViewMatrix*
-            vec4(p,1.0);
-
-        gl_PointSize=
-            clamp(
-                aSize*
-                uPixelRatio*
-                68.0/
-                max(8.0,-mv.z),
-                .4,
-                3.2
-            );
-
-        gl_Position=
-            projectionMatrix*mv;
-
-        float hot=
-            smoothstep(
-                .94,
-                1.0,
-                aSeed
-            );
-
-        vColor=
-            mix(
-                vec3(.83,.28,.70),
-                vec3(1.0,.88,.96),
-                hot
-            );
-
-        vAlpha=
-            (
-                .16+
-                aSeed*.30
-            )*
-            (
-                .68+
-                .32*sin(
-                    uTime*
-                    (1.0+aSeed)+
-                    aSeed*28.0
-                )
-            );
-    }
-    `;
-
-    const fragment=`
-    precision highp float;
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main(){
-
-        vec2 p=
-            gl_PointCoord-.5;
-
-        float d=
-            length(p);
-
-        if(d>.5)discard;
-
-        float a=
-            exp(-d*d*28.0)*
-            vAlpha;
-
-        gl_FragColor=
-            vec4(
-                vColor,
-                a
-            );
-    }
-    `;
-
-    const material=
-        new THREE.ShaderMaterial({
-            vertexShader:vertex,
-            fragmentShader:fragment,
-
-            uniforms:{
-                uTime:{value:0},
-                uPixelRatio:{value:DPR}
-            },
-
-            transparent:true,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    const points=
-        new THREE.Points(
-            geometry,
-            material
-        );
-
-    points.frustumCulled=false;
-
-    heartGroup.add(points);
-
-    return material;
+    return c;
 }
 
-const innerMaterial=
-    createInnerDust();
-
-function createSparks(){
-
-    const n=COUNT.sparks;
-
-    const geometry=
-        new THREE.BufferGeometry();
-
-    const position=
-        new Float32Array(n*3);
-
-    const angle=
-        new Float32Array(n);
-
-    const seed=
-        new Float32Array(n);
-
-    const speed=
-        new Float32Array(n);
-
-    const distance=
-        new Float32Array(n);
-
-    const size=
-        new Float32Array(n);
-
-    const spread=
-        new Float32Array(n);
-
-    for(let i=0;i<n;i++){
-
-        angle[i]=
-            Math.random()*
-            Math.PI*2;
-
-        seed[i]=
-            Math.random();
-
-        speed[i]=
-            .035+
-            Math.random()*.080;
-
-        distance[i]=
-            2.5+
-            Math.pow(
-                Math.random(),
-                .55
-            )*11;
-
-        size[i]=
-            .35+
-            Math.random()*.75;
-
-        spread[i]=
-            (Math.random()-.5)*1.1;
-    }
-
-    geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            position,
-            3
-        )
+function createSprites(){
+    glowWhite=makeSprite(
+        64,
+        "rgba(255,255,255,1)",
+        "rgba(255,220,242,.9)"
     );
 
-    geometry.setAttribute(
-        "aAngle",
-        new THREE.BufferAttribute(
-            angle,
-            1
-        )
+    glowPink=makeSprite(
+        48,
+        "rgba(255,240,250,.92)",
+        "rgba(255,130,205,.72)"
     );
 
-    geometry.setAttribute(
-        "aSeed",
-        new THREE.BufferAttribute(
-            seed,
-            1
-        )
+    glowTiny=makeSprite(
+        24,
+        "rgba(255,248,252,.9)",
+        "rgba(255,155,215,.55)"
     );
-
-    geometry.setAttribute(
-        "aSpeed",
-        new THREE.BufferAttribute(
-            speed,
-            1
-        )
-    );
-
-    geometry.setAttribute(
-        "aDistance",
-        new THREE.BufferAttribute(
-            distance,
-            1
-        )
-    );
-
-    geometry.setAttribute(
-        "aSize",
-        new THREE.BufferAttribute(
-            size,
-            1
-        )
-    );
-
-    geometry.setAttribute(
-        "aSpread",
-        new THREE.BufferAttribute(
-            spread,
-            1
-        )
-    );
-
-    const vertex=`
-    ${commonHeartFunctions}
-
-    attribute float aAngle;
-    attribute float aSeed;
-    attribute float aSpeed;
-    attribute float aDistance;
-    attribute float aSize;
-    attribute float aSpread;
-
-    uniform float uTime;
-    uniform float uPixelRatio;
-
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main(){
-
-        float life=
-            fract(
-                aSeed+
-                uTime*aSpeed
-            );
-
-        float t=
-            aAngle+
-            uTime*.015;
-
-        vec2 hp=
-            heart(t);
-
-        vec2 tangent=
-            normalize(
-                heartDerivative(t)
-            );
-
-        vec2 normal=
-            vec2(
-                -tangent.y,
-                tangent.x
-            );
-
-        float side=
-            sign(
-                dot(
-                    hp,
-                    normal
-                )
-            );
-
-        normal*=side;
-
-        float travel=
-            pow(
-                life,
-                1.45
-            );
-
-        vec2 p2=
-            hp+
-            normal*
-            (
-                travel*
-                aDistance
-            );
-
-        p2+=
-            tangent*
-            aSpread*
-            travel;
-
-        p2.x+=
-            sin(
-                life*15.0+
-                aSeed*31.0+
-                uTime*1.4
-            )*
-            .12*
-            life;
-
-        p2.y+=
-            cos(
-                life*12.0+
-                aSeed*23.0+
-                uTime
-            )*
-            .10*
-            life;
-
-        float zz=
-            sin(
-                aSeed*17.0+
-                life*7.0
-            )*
-            2.0*
-            life;
-
-        vec3 p=
-            vec3(
-                p2.x,
-                p2.y,
-                zz
-            );
-
-        vec4 mv=
-            modelViewMatrix*
-            vec4(p,1.0);
-
-        gl_PointSize=
-            clamp(
-                aSize*
-                uPixelRatio*
-                72.0/
-                max(8.0,-mv.z),
-                .4,
-                3.5
-            );
-
-        gl_Position=
-            projectionMatrix*mv;
-
-        float fadeIn=
-            smoothstep(
-                0.0,
-                .08,
-                life
-            );
-
-        float fadeOut=
-            1.0-
-            smoothstep(
-                .45,
-                1.0,
-                life
-            );
-
-        vAlpha=
-            fadeIn*
-            fadeOut*
-            (.30+aSeed*.52);
-
-        vColor=
-            mix(
-                vec3(1.0,.34,.70),
-                vec3(1.0,.90,.97),
-                pow(
-                    1.0-life,
-                    3.0
-                )
-            );
-    }
-    `;
-
-    const fragment=`
-    precision highp float;
-
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main(){
-
-        vec2 p=
-            gl_PointCoord-.5;
-
-        float d=
-            length(p);
-
-        if(d>.5)discard;
-
-        float a=
-            exp(
-                -d*d*30.0
-            )*
-            vAlpha;
-
-        gl_FragColor=
-            vec4(
-                vColor,
-                a
-            );
-    }
-    `;
-
-    const material=
-        new THREE.ShaderMaterial({
-            vertexShader:vertex,
-            fragmentShader:fragment,
-
-            uniforms:{
-                uTime:{value:0},
-                uPixelRatio:{value:DPR}
-            },
-
-            transparent:true,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    const particles=
-        new THREE.Points(
-            geometry,
-            material
-        );
-
-    particles.frustumCulled=false;
-
-    heartGroup.add(particles);
-
-    return material;
 }
 
-const sparkMaterial=
-    createSparks();
+function createParticles(){
+    tinyParticles=[];
+    softParticles=[];
+    hotParticles=[];
+    innerParticles=[];
+    rays=[];
+    stars=[];
+    streamParticles=[];
 
-function createHeartRays(){
+    const mobile=W<700;
 
-    const positions=[];
-    const colors=[];
+    const contourCount=mobile?6500:14500;
+    const innerCount=mobile?1100:2600;
+    const rayCount=mobile?75:165;
+    const starCount=mobile?450:1200;
+    const streamCount=mobile?420:1050;
 
-    for(let i=0;i<COUNT.rays;i++){
+    for(let i=0;i<contourCount;i++){
+        let band;
+        const r=Math.random();
 
-        const t=
-            Math.random()*
-            Math.PI*2;
+        if(r<.70){
+            band=gaussian()*.48;
+        }else if(r<.94){
+            band=gaussian()*.90;
+        }else{
+            band=gaussian()*1.65;
+        }
 
-        const s=Math.sin(t);
+        const p={
+            u:Math.random(),
+            band,
+            speed:rand(.006,.018)*(Math.random()<.12?-1:1),
+            phase:rand(0,TAU),
+            wobble:rand(.02,.18),
+            alpha:rand(.45,1),
+            size:rand(.7,1.35)
+        };
 
-        const x=
-            16*s*s*s*
-            HEART_SCALE;
+        const q=Math.random();
 
-        const y=
-            (
-                13*Math.cos(t)
-                -5*Math.cos(2*t)
-                -2*Math.cos(3*t)
-                -Math.cos(4*t)
-            )*
-            HEART_SCALE;
-
-        const len=
-            4+
-            Math.random()*12;
-
-        const length=
-            Math.sqrt(
-                x*x+y*y
-            )||1;
-
-        const nx=
-            x/length;
-
-        const ny=
-            y/length;
-
-        const jitter=
-            (Math.random()-.5)*.12;
-
-        positions.push(
-            x,
-            y+3.25,
-            -2-Math.random()*4,
-
-            x+
-            nx*len+
-            jitter*len,
-            y+3.25+
-            ny*len,
-            -4-Math.random()*8
-        );
-
-        colors.push(
-            .38,.08,.28,
-            .015,.002,.01
-        );
-
-    }
-
-    const geometry=
-        new THREE.BufferGeometry();
-
-    geometry.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            positions,
-            3
-        )
-    );
-
-    geometry.setAttribute(
-        "color",
-        new THREE.Float32BufferAttribute(
-            colors,
-            3
-        )
-    );
-
-    const material=
-        new THREE.LineBasicMaterial({
-            vertexColors:true,
-            transparent:true,
-            opacity:.22,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    const lines=
-        new THREE.LineSegments(
-            geometry,
-            material
-        );
-
-    scene.add(lines);
-
-    return lines;
-}
-
-const rays=createHeartRays();
-
-function createStars(){
-
-    const n=COUNT.stars;
-
-    const positions=
-        new Float32Array(n*3);
-
-    const colors=
-        new Float32Array(n*3);
-
-    for(let i=0;i<n;i++){
-
-        positions[i*3]=
-            (Math.random()-.5)*75;
-
-        positions[i*3+1]=
-            (Math.random()-.5)*48+3;
-
-        positions[i*3+2]=
-            -8-
-            Math.random()*45;
-
-        const brightness=
-            .16+
-            Math.random()*.38;
-
-        colors[i*3]=
-            brightness;
-
-        colors[i*3+1]=
-            brightness*.42;
-
-        colors[i*3+2]=
-            brightness*.75;
-
-    }
-
-    const geometry=
-        new THREE.BufferGeometry();
-
-    geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            positions,
-            3
-        )
-    );
-
-    geometry.setAttribute(
-        "color",
-        new THREE.BufferAttribute(
-            colors,
-            3
-        )
-    );
-
-    const material=
-        new THREE.PointsMaterial({
-            size:.075,
-            vertexColors:true,
-            transparent:true,
-            opacity:.55,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    const stars=
-        new THREE.Points(
-            geometry,
-            material
-        );
-
-    scene.add(stars);
-
-    return stars;
-}
-
-const stars=createStars();
-
-const FLOOR_Y=-12.15;
-
-function createFloor(){
-
-    const group=
-        new THREE.Group();
-
-    scene.add(group);
-
-    const linePositions=[];
-    const lineColors=[];
-
-    const rings=25;
-
-    for(let r=1;r<=rings;r++){
-
-        const radius=
-            .60+
-            Math.pow(
-                r/rings,
-                1.25
-            )*18;
-
-        const segments=100;
-
-        for(let i=0;i<segments;i++){
-
-            const a=
-                i/
-                segments*
-                Math.PI*2;
-
-            const b=
-                (i+1)/
-                segments*
-                Math.PI*2;
-
-            linePositions.push(
-                Math.cos(a)*radius,
-                FLOOR_Y,
-                Math.sin(a)*radius
-            );
-
-            linePositions.push(
-                Math.cos(b)*radius,
-                FLOOR_Y,
-                Math.sin(b)*radius
-            );
-
-            const alpha=
-                .35*
-                (
-                    1-r/rings
-                );
-
-            lineColors.push(
-                alpha,
-                alpha*.42,
-                alpha*.75
-            );
-
-            lineColors.push(
-                alpha,
-                alpha*.42,
-                alpha*.75
-            );
+        if(q<.79){
+            tinyParticles.push(p);
+        }else if(q<.965){
+            p.size=rand(3.0,6.5);
+            softParticles.push(p);
+        }else{
+            p.size=rand(7,14);
+            hotParticles.push(p);
         }
     }
 
-    const spokes=40;
+    for(let i=0;i<innerCount;i++){
+        const t=Math.random();
+        const radius=Math.pow(Math.random(),.72)*.83;
+        const p=sampleCurve(t);
 
-    for(let i=0;i<spokes;i++){
-
-        const a=
-            i/spokes*
-            Math.PI*2;
-
-        linePositions.push(
-            0,
-            FLOOR_Y,
-            0
-        );
-
-        linePositions.push(
-            Math.cos(a)*18,
-            FLOOR_Y,
-            Math.sin(a)*18
-        );
-
-        lineColors.push(
-            .18,.055,.15
-        );
-
-        lineColors.push(
-            .008,.002,.007
-        );
-    }
-
-    const geometry=
-        new THREE.BufferGeometry();
-
-    geometry.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            linePositions,
-            3
-        )
-    );
-
-    geometry.setAttribute(
-        "color",
-        new THREE.Float32BufferAttribute(
-            lineColors,
-            3
-        )
-    );
-
-    const material=
-        new THREE.LineBasicMaterial({
-            vertexColors:true,
-            transparent:true,
-            opacity:.16,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    group.add(
-        new THREE.LineSegments(
-            geometry,
-            material
-        )
-    );
-
-    const dots=3500;
-
-    const dotPositions=
-        new Float32Array(
-            dots*3
-        );
-
-    const dotColors=
-        new Float32Array(
-            dots*3
-        );
-
-    for(let i=0;i<dots;i++){
-
-        const radius=
-            Math.sqrt(
-                Math.random()
-            )*18;
-
-        const a=
-            Math.random()*
-            Math.PI*2;
-
-        dotPositions[i*3]=
-            Math.cos(a)*radius;
-
-        dotPositions[i*3+1]=
-            FLOOR_Y+
-            Math.random()*.015;
-
-        dotPositions[i*3+2]=
-            Math.sin(a)*radius;
-
-        const near=
-            1-radius/18;
-
-        dotColors[i*3]=
-            .35+
-            near*.30;
-
-        dotColors[i*3+1]=
-            .12+
-            near*.20;
-
-        dotColors[i*3+2]=
-            .42+
-            near*.35;
-    }
-
-    const dotGeometry=
-        new THREE.BufferGeometry();
-
-    dotGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            dotPositions,
-            3
-        )
-    );
-
-    dotGeometry.setAttribute(
-        "color",
-        new THREE.BufferAttribute(
-            dotColors,
-            3
-        )
-    );
-
-    const dotMaterial=
-        new THREE.PointsMaterial({
-            size:.035,
-            vertexColors:true,
-            transparent:true,
-            opacity:.36,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    group.add(
-        new THREE.Points(
-            dotGeometry,
-            dotMaterial
-        )
-    );
-
-    const ringGroup=
-        new THREE.Group();
-
-    ringGroup.position.y=
-        FLOOR_Y+.03;
-
-    group.add(ringGroup);
-
-    for(let i=0;i<7;i++){
-
-        const radius=
-            .55+
-            i*.48;
-
-        const points=[];
-
-        for(let j=0;j<150;j++){
-
-            const a=
-                j/150*
-                Math.PI*2;
-
-            points.push(
-                new THREE.Vector3(
-                    Math.cos(a)*radius,
-                    0,
-                    Math.sin(a)*radius
-                )
-            );
-        }
-
-        const rg=
-            new THREE.BufferGeometry()
-            .setFromPoints(
-                points
-            );
-
-        const rm=
-            new THREE.LineBasicMaterial({
-                color:
-                    i<2
-                    ?0xffcce7
-                    :0xe46abb,
-
-                transparent:true,
-
-                opacity:
-                    .32-
-                    i*.038,
-
-                depthWrite:false,
-
-                blending:
-                    THREE.AdditiveBlending
-            });
-
-        ringGroup.add(
-            new THREE.LineLoop(
-                rg,
-                rm
-            )
-        );
-    }
-
-    return ringGroup;
-}
-
-const floorRings=
-    createFloor();
-
-function createFountain(){
-
-    const n=
-        COUNT.fountain;
-
-    const geometry=
-        new THREE.BufferGeometry();
-
-    geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            new Float32Array(
-                n*3
-            ),
-            3
-        )
-    );
-
-    const phase=
-        new Float32Array(n);
-
-    const radius=
-        new Float32Array(n);
-
-    const seed=
-        new Float32Array(n);
-
-    for(let i=0;i<n;i++){
-
-        phase[i]=
-            Math.random();
-
-        radius[i]=
-            Math.pow(
-                Math.random(),
-                2
-            )*1.1;
-
-        seed[i]=
-            Math.random();
-    }
-
-    geometry.setAttribute(
-        "aPhase",
-        new THREE.BufferAttribute(
-            phase,
-            1
-        )
-    );
-
-    geometry.setAttribute(
-        "aRadius",
-        new THREE.BufferAttribute(
+        innerParticles.push({
+            u:t,
             radius,
-            1
-        )
-    );
-
-    geometry.setAttribute(
-        "aSeed",
-        new THREE.BufferAttribute(
-            seed,
-            1
-        )
-    );
-
-    const vertex=`
-    attribute float aPhase;
-    attribute float aRadius;
-    attribute float aSeed;
-
-    uniform float uTime;
-    uniform float uPixelRatio;
-
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main(){
-
-        float q=
-            fract(
-                aPhase+
-                uTime*
-                (
-                    .10+
-                    aSeed*.12
-                )
-            );
-
-        float y=
-            mix(
-                ${FLOOR_Y.toFixed(3)},
-                -7.05,
-                q
-            );
-
-        float taper=
-            1.0-q*.72;
-
-        float angle=
-            aSeed*27.0+
-            uTime*
-            (
-                .4+
-                aSeed*.3
-            );
-
-        float radius=
-            aRadius*
-            taper;
-
-        vec3 p=
-            vec3(
-                cos(angle)*radius,
-                y,
-                sin(angle)*radius*.45
-            );
-
-        p.x+=
-            sin(
-                q*16.0+
-                uTime*2.0+
-                aSeed*24.0
-            )*.055;
-
-        vec4 mv=
-            modelViewMatrix*
-            vec4(p,1.0);
-
-        gl_PointSize=
-            clamp(
-                (
-                    .6+
-                    aSeed*.9
-                )*
-                uPixelRatio*
-                70.0/
-                max(8.0,-mv.z),
-                .45,
-                3.5
-            );
-
-        gl_Position=
-            projectionMatrix*mv;
-
-        float fade=
-            sin(
-                q*
-                3.14159265
-            );
-
-        vAlpha=
-            fade*
-            (
-                .28+
-                aSeed*.62
-            );
-
-        vColor=
-            mix(
-                vec3(1.0,.32,.72),
-                vec3(1.0,.94,.99),
-                pow(aSeed,2.5)
-            );
-    }
-    `;
-
-    const fragment=`
-    precision highp float;
-
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main(){
-
-        vec2 p=
-            gl_PointCoord-.5;
-
-        float d=
-            length(p);
-
-        if(d>.5)discard;
-
-        float a=
-            exp(
-                -d*d*28.0
-            )*
-            vAlpha;
-
-        gl_FragColor=
-            vec4(
-                vColor,
-                a
-            );
-    }
-    `;
-
-    const material=
-        new THREE.ShaderMaterial({
-            vertexShader:vertex,
-            fragmentShader:fragment,
-
-            uniforms:{
-                uTime:{value:0},
-                uPixelRatio:{value:DPR}
-            },
-
-            transparent:true,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
+            phase:rand(0,TAU),
+            alpha:rand(.12,.55),
+            size:Math.random()<.91?rand(.55,1.35):rand(3,6),
+            hot:Math.random()<.06
         });
+    }
 
-    const points=
-        new THREE.Points(
-            geometry,
-            material
-        );
+    for(let i=0;i<rayCount;i++){
+        rays.push({
+            u:Math.random(),
+            length:rand(.08,.31),
+            speed:rand(.025,.075),
+            phase:Math.random(),
+            width:rand(.35,1.15),
+            alpha:rand(.05,.20),
+            offset:rand(5,55)
+        });
+    }
 
-    points.frustumCulled=false;
+    for(let i=0;i<starCount;i++){
+        stars.push({
+            x:Math.random(),
+            y:Math.random(),
+            phase:rand(0,TAU),
+            alpha:rand(.06,.46),
+            size:Math.random()<.94?rand(.45,1.25):rand(2,4.5)
+        });
+    }
 
-    scene.add(points);
-
-    return material;
+    for(let i=0;i<streamCount;i++){
+        streamParticles.push({
+            phase:Math.random(),
+            speed:rand(.05,.16),
+            spread:gaussian(),
+            drift:rand(0,TAU),
+            alpha:rand(.2,1),
+            size:Math.random()<.88?rand(.7,1.6):rand(3,7)
+        });
+    }
 }
 
-const fountainMaterial=
-    createFountain();
+function resize(){
+    W=window.innerWidth;
+    H=window.innerHeight;
 
-const pointer={
-    x:0,
-    y:0,
-    tx:0,
-    ty:0
-};
+    DPR=Math.min(window.devicePixelRatio||1,1.75);
 
-addEventListener(
-    "pointermove",
-    e=>{
+    canvas.width=Math.round(W*DPR);
+    canvas.height=Math.round(H*DPR);
 
-        pointer.tx=
-            (
-                e.clientX/
-                innerWidth-
-                .5
-            )*2;
+    canvas.style.width=W+"px";
+    canvas.style.height=H+"px";
 
-        pointer.ty=
-            (
-                e.clientY/
-                innerHeight-
-                .5
-            )*2;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
 
-    },
-    {passive:true}
-);
+    createParticles();
+}
 
-addEventListener(
-    "pointerleave",
-    ()=>{
+function layout(){
+    const mobile=W<700;
 
-        pointer.tx=0;
-        pointer.ty=0;
+    const heartWidth=mobile
+        ?Math.min(W*.86,H*.55)
+        :Math.min(W*.58,H*.52);
 
-    },
-    {passive:true}
-);
+    const scale=heartWidth/32;
+
+    const cx=W*.5+mouseX*5;
+    const cy=H*(mobile?.34:.355)+mouseY*3;
+
+    return {cx,cy,scale};
+}
 
 function heartbeat(t){
+    const q=t%1.52;
 
-    const cycle=
-        t%1.55;
+    let beat=0;
 
-    let value=0;
-
-    if(cycle<.115){
-
-        value=
-            Math.sin(
-                cycle/
-                .115*
-                Math.PI
-            );
-
+    if(q<.11){
+        beat=Math.sin(q/.11*Math.PI);
     }
 
-    if(
-        cycle>.18&&
-        cycle<.295
-    ){
-
-        value+=
-            .52*
-            Math.sin(
-                (
-                    cycle-.18
-                )/
-                .115*
-                Math.PI
-            );
-
+    if(q>.18&&q<.30){
+        beat+=.48*Math.sin((q-.18)/.12*Math.PI);
     }
 
-    return value;
+    return 1+beat*.026+Math.sin(t*.72)*.004;
 }
 
-addEventListener(
-    "resize",
+function heartScreenPoint(u,cx,cy,scale,pulse,band=0){
+    const p=sampleCurve(u);
+
+    const wobbleScale=scale*band;
+
+    return {
+        x:cx+p.x*scale*pulse+p.nx*wobbleScale,
+        y:cy+p.y*scale*pulse+p.ny*wobbleScale,
+        nx:p.nx,
+        ny:p.ny,
+        lx:p.x,
+        ly:p.y
+    };
+}
+
+function drawBackground(t){
+    ctx.globalCompositeOperation="source-over";
+
+    ctx.fillStyle="#06030b";
+    ctx.fillRect(0,0,W,H);
+
+    let g=ctx.createRadialGradient(
+        W*.5,H*.37,0,
+        W*.5,H*.37,Math.max(W,H)*.62
+    );
+
+    g.addColorStop(0,"rgba(74,29,66,.30)");
+    g.addColorStop(.27,"rgba(44,17,48,.20)");
+    g.addColorStop(.58,"rgba(17,8,25,.11)");
+    g.addColorStop(1,"rgba(0,0,0,0)");
+
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.globalCompositeOperation="lighter";
+
+    ctx.fillStyle="rgba(245,160,215,.52)";
+
+    for(const s of stars){
+        const a=
+            s.alpha*
+            (.58+.42*Math.sin(t*.75+s.phase));
+
+        if(a<=.02)continue;
+
+        ctx.globalAlpha=a;
+
+        const x=s.x*W;
+        const y=s.y*H;
+
+        if(s.size<1.8){
+            ctx.fillRect(x,y,s.size,s.size);
+        }else{
+            ctx.drawImage(
+                glowTiny,
+                x-s.size*.5,
+                y-s.size*.5,
+                s.size,
+                s.size
+            );
+        }
+    }
+
+    ctx.globalAlpha=1;
+}
+
+function buildHeartPath(cx,cy,scale,pulse){
+    ctx.beginPath();
+
+    const steps=400;
+
+    for(let i=0;i<=steps;i++){
+        const u=i/steps;
+        const p=sampleCurve(u);
+
+        const x=cx+p.x*scale*pulse;
+        const y=cy+p.y*scale*pulse;
+
+        if(i===0)ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
+    }
+
+    ctx.closePath();
+}
+
+function drawHeartGlow(cx,cy,scale,pulse){
+    ctx.save();
+
+    ctx.globalCompositeOperation="lighter";
+
+    buildHeartPath(cx,cy,scale,pulse);
+
+    ctx.filter=`blur(${Math.max(7,scale*.85)}px)`;
+    ctx.strokeStyle="rgba(255,65,177,.15)";
+    ctx.lineWidth=scale*4.1;
+    ctx.stroke();
+
+    buildHeartPath(cx,cy,scale,pulse);
+
+    ctx.filter=`blur(${Math.max(4,scale*.4)}px)`;
+    ctx.strokeStyle="rgba(255,140,205,.17)";
+    ctx.lineWidth=scale*2.7;
+    ctx.stroke();
+
+    buildHeartPath(cx,cy,scale,pulse);
+
+    ctx.filter=`blur(${Math.max(1.5,scale*.12)}px)`;
+    ctx.strokeStyle="rgba(255,228,242,.20)";
+    ctx.lineWidth=scale*.92;
+    ctx.stroke();
+
+    ctx.filter="none";
+    ctx.restore();
+}
+
+function drawRays(t,cx,cy,scale,pulse){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+
+    const maxDim=Math.max(W,H);
+
+    for(const r of rays){
+        const q=(r.phase+t*r.speed)%1;
+
+        const hp=heartScreenPoint(
+            r.u,
+            cx,
+            cy,
+            scale,
+            pulse
+        );
+
+        let dx=hp.x-cx;
+        let dy=hp.y-cy;
+
+        let len=Math.sqrt(dx*dx+dy*dy)||1;
+
+        dx/=len;
+        dy/=len;
+
+        const moving=r.offset+q*90;
+        const startX=hp.x+dx*moving;
+        const startY=hp.y+dy*moving;
+
+        const rayLength=maxDim*r.length*(.55+.45*(1-q));
+
+        const endX=startX+dx*rayLength;
+        const endY=startY+dy*rayLength;
+
+        const fade=Math.pow(1-q,1.45);
+
+        ctx.globalAlpha=r.alpha*fade;
+        ctx.strokeStyle="rgba(255,78,186,1)";
+        ctx.lineWidth=r.width;
+
+        ctx.beginPath();
+        ctx.moveTo(startX,startY);
+        ctx.lineTo(endX,endY);
+        ctx.stroke();
+
+        if(r.alpha>.11){
+            const s=3+r.width*3;
+
+            ctx.globalAlpha=r.alpha*fade*.7;
+
+            ctx.drawImage(
+                glowTiny,
+                startX-s*.5,
+                startY-s*.5,
+                s,s
+            );
+        }
+    }
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawInterior(t,cx,cy,scale,pulse){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+
+    ctx.fillStyle="rgba(255,176,219,.72)";
+
+    for(const p of innerParticles){
+        const hp=sampleCurve(p.u);
+
+        const driftX=Math.sin(t*.55+p.phase)*scale*.06;
+        const driftY=Math.cos(t*.47+p.phase*1.3)*scale*.05;
+
+        const x=
+            cx+
+            hp.x*scale*p.radius*pulse+
+            driftX;
+
+        const y=
+            cy+
+            hp.y*scale*p.radius*pulse+
+            driftY;
+
+        const twinkle=
+            .52+
+            .48*Math.sin(
+                t*(.7+p.alpha)+
+                p.phase
+            );
+
+        const alpha=
+            p.alpha*
+            (.45+.55*twinkle);
+
+        ctx.globalAlpha=alpha;
+
+        if(p.size<2){
+            ctx.fillRect(x,y,p.size,p.size);
+        }else{
+            const s=p.hot?p.size*1.5:p.size;
+
+            ctx.drawImage(
+                p.hot?glowWhite:glowTiny,
+                x-s*.5,
+                y-s*.5,
+                s,s
+            );
+        }
+    }
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function particlePosition(p,t,cx,cy,scale,pulse){
+    const u=p.u+t*p.speed;
+
+    const wobble=
+        p.band+
+        Math.sin(
+            t*.75+
+            p.phase
+        )*p.wobble;
+
+    return heartScreenPoint(
+        u,
+        cx,
+        cy,
+        scale,
+        pulse,
+        wobble
+    );
+}
+
+function drawHeartParticles(t,cx,cy,scale,pulse){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+
+    ctx.fillStyle="rgba(255,191,226,.88)";
+    ctx.globalAlpha=.68;
+
+    for(const p of tinyParticles){
+        const a=particlePosition(
+            p,t,cx,cy,scale,pulse
+        );
+
+        const size=p.size;
+
+        ctx.fillRect(
+            a.x-size*.5,
+            a.y-size*.5,
+            size,
+            size
+        );
+    }
+
+    ctx.globalAlpha=.68;
+
+    for(const p of softParticles){
+        const a=particlePosition(
+            p,t,cx,cy,scale,pulse
+        );
+
+        const shimmer=
+            .72+
+            .28*Math.sin(
+                t*1.6+
+                p.phase
+            );
+
+        const s=p.size*shimmer;
+
+        ctx.globalAlpha=
+            p.alpha*.58;
+
+        ctx.drawImage(
+            glowPink,
+            a.x-s*.5,
+            a.y-s*.5,
+            s,s
+        );
+    }
+
+    for(const p of hotParticles){
+        const a=particlePosition(
+            p,t,cx,cy,scale,pulse
+        );
+
+        const shimmer=
+            .76+
+            .24*Math.sin(
+                t*2.1+
+                p.phase
+            );
+
+        const s=p.size*shimmer;
+
+        ctx.globalAlpha=
+            .68+
+            p.alpha*.28;
+
+        ctx.drawImage(
+            glowWhite,
+            a.x-s*.5,
+            a.y-s*.5,
+            s,s
+        );
+    }
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawHotContour(cx,cy,scale,pulse){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+
+    buildHeartPath(cx,cy,scale,pulse);
+
+    ctx.strokeStyle="rgba(255,236,246,.14)";
+    ctx.lineWidth=Math.max(.55,scale*.13);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+function getHeartBottom(cx,cy,scale,pulse){
+    let maxY=-Infinity;
+
+    for(let i=0;i<512;i++){
+        const p=sampleCurve(i/512);
+        const y=cy+p.y*scale*pulse;
+        if(y>maxY)maxY=y;
+    }
+
+    return maxY;
+}
+
+function drawFloor(t,cx,floorY){
+    const maxR=Math.min(
+        W*.60,
+        H*1.08
+    );
+
+    const yScale=.205;
+
+    ctx.save();
+
+    ctx.globalCompositeOperation="lighter";
+
+    /*
+     * 放射线
+     */
+    ctx.lineWidth=.55;
+    ctx.setLineDash([1.1,5]);
+
+    const spokes=W<700?38:64;
+
+    for(let i=0;i<spokes;i++){
+        const a=i/spokes*TAU;
+
+        const x2=cx+Math.cos(a)*maxR;
+        const y2=floorY+Math.sin(a)*maxR*yScale;
+
+        const front=(Math.sin(a)+1)*.5;
+
+        ctx.globalAlpha=.045+.075*front;
+        ctx.strokeStyle="rgba(216,116,222,1)";
+
+        ctx.beginPath();
+        ctx.moveTo(cx,floorY);
+        ctx.lineTo(x2,y2);
+        ctx.stroke();
+    }
+
+    /*
+     * 波纹环
+     */
+    const rings=W<700?18:27;
+
+    ctx.setLineDash([1.2,3.2]);
+
+    for(let ri=1;ri<=rings;ri++){
+        const q=ri/rings;
+
+        const baseR=
+            maxR*
+            Math.pow(q,1.38);
+
+        const steps=190;
+
+        ctx.beginPath();
+
+        for(let j=0;j<=steps;j++){
+            const a=j/steps*TAU;
+
+            const petals=
+                1+
+                (.030+.045*(1-q))*
+                Math.sin(
+                    a*8-
+                    t*.60+
+                    ri*.53
+                );
+
+            const ripple=
+                1+
+                .014*
+                Math.sin(
+                    a*17+
+                    t*.36+
+                    ri
+                );
+
+            const r=
+                baseR*
+                petals*
+                ripple;
+
+            const x=
+                cx+
+                Math.cos(a)*r;
+
+            const y=
+                floorY+
+                Math.sin(a)*r*yScale;
+
+            if(j===0)ctx.moveTo(x,y);
+            else ctx.lineTo(x,y);
+        }
+
+        ctx.globalAlpha=
+            .055+
+            .21*(1-q);
+
+        ctx.strokeStyle=
+            ri%3===0
+                ?"rgba(255,205,239,1)"
+                :"rgba(216,121,222,1)";
+
+        ctx.lineWidth=
+            ri<7?1:.65;
+
+        ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
+
+    /*
+     * 地面星点
+     */
+    const pointCount=W<700?400:1050;
+
+    ctx.fillStyle="rgba(246,183,231,.82)";
+
+    for(let i=0;i<pointCount;i++){
+        const hash1=(i*12.9898)%1;
+        const hash2=(i*78.233)%1;
+
+        const r=
+            Math.sqrt(
+                (Math.sin(i*91.7)*43758.5453)%1
+            );
+
+        const rr=
+            Math.abs(r)*
+            maxR;
+
+        const a=
+            (
+                Math.abs(
+                    Math.sin(i*51.91)*923.3
+                )%1
+            )*
+            TAU;
+
+        const x=
+            cx+
+            Math.cos(a)*rr;
+
+        const y=
+            floorY+
+            Math.sin(a)*rr*yScale;
+
+        ctx.globalAlpha=
+            .08+
+            .22*
+            (1-rr/maxR);
+
+        ctx.fillRect(
+            x,
+            y,
+            .7,
+            .7
+        );
+    }
+
+    ctx.globalAlpha=1;
+
+    /*
+     * 中央光环
+     */
+    for(let i=0;i<7;i++){
+        const pulse=
+            1+
+            Math.sin(
+                t*1.35-
+                i*.55
+            )*.045;
+
+        const rx=
+            (13+i*12)*
+            pulse;
+
+        const ry=
+            (2.8+i*2.2)*
+            pulse;
+
+        ctx.globalAlpha=
+            .28-
+            i*.027;
+
+        ctx.strokeStyle=
+            i<2
+                ?"rgba(255,244,251,1)"
+                :"rgba(255,142,215,1)";
+
+        ctx.lineWidth=
+            i<2?1.05:.75;
+
+        ctx.beginPath();
+        ctx.ellipse(
+            cx,
+            floorY,
+            rx,
+            ry,
+            0,
+            0,
+            TAU
+        );
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+function drawStream(t,cx,tipY,floorY,scale){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+
+    /*
+     * 模糊能量柱
+     */
+    ctx.filter=`blur(${Math.max(5,scale*.45)}px)`;
+
+    let gradient=ctx.createLinearGradient(
+        cx,tipY,
+        cx,floorY
+    );
+
+    gradient.addColorStop(
+        0,
+        "rgba(255,214,239,.18)"
+    );
+
+    gradient.addColorStop(
+        .45,
+        "rgba(255,96,194,.12)"
+    );
+
+    gradient.addColorStop(
+        1,
+        "rgba(255,240,249,.30)"
+    );
+
+    ctx.strokeStyle=gradient;
+    ctx.lineWidth=Math.max(5,scale*.6);
+
+    ctx.beginPath();
+    ctx.moveTo(cx,tipY);
+    ctx.lineTo(cx,floorY);
+    ctx.stroke();
+
+    ctx.filter="none";
+
+    /*
+     * 粒子流
+     */
+    for(const p of streamParticles){
+        const q=
+            (
+                p.phase+
+                t*p.speed
+            )%1;
+
+        const middle=
+            Math.sin(q*Math.PI);
+
+        const y=
+            tipY+
+            (floorY-tipY)*q;
+
+        const width=
+            scale*
+            (
+                .10+
+                middle*.42
+            );
+
+        const x=
+            cx+
+            p.spread*
+            width+
+            Math.sin(
+                t*1.7+
+                p.drift+
+                q*11
+            )*
+            scale*.055;
+
+        const alpha=
+            p.alpha*
+            middle;
+
+        ctx.globalAlpha=alpha;
+
+        if(p.size<2.5){
+            ctx.fillStyle="rgba(255,224,241,.9)";
+            ctx.fillRect(
+                x,
+                y,
+                p.size,
+                p.size
+            );
+        }else{
+            const s=p.size;
+
+            ctx.drawImage(
+                glowWhite,
+                x-s*.5,
+                y-s*.5,
+                s,s
+            );
+        }
+    }
+
+    /*
+     * 接地点强光
+     */
+    const groundGlow=
+        Math.max(
+            20,
+            scale*2.5
+        );
+
+    ctx.globalAlpha=.72;
+
+    ctx.drawImage(
+        glowWhite,
+        cx-groundGlow*.5,
+        floorY-groundGlow*.5,
+        groundGlow,
+        groundGlow
+    );
+
+    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawVignette(){
+    ctx.save();
+
+    ctx.globalCompositeOperation="source-over";
+
+    const g=
+        ctx.createRadialGradient(
+            W*.5,
+            H*.46,
+            Math.min(W,H)*.18,
+            W*.5,
+            H*.46,
+            Math.max(W,H)*.72
+        );
+
+    g.addColorStop(0,"rgba(0,0,0,0)");
+    g.addColorStop(.6,"rgba(0,0,0,.04)");
+    g.addColorStop(1,"rgba(0,0,0,.72)");
+
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.restore();
+}
+
+let lastTime=performance.now();
+
+function frame(now){
+    requestAnimationFrame(frame);
+
+    const dt=Math.min(
+        (now-lastTime)/1000,
+        .033
+    );
+
+    lastTime=now;
+
+    const t=now*.001;
+
+    mouseX+=
+        (targetMouseX-mouseX)*
+        .025;
+
+    mouseY+=
+        (targetMouseY-mouseY)*
+        .025;
+
+    const {cx,cy,scale}=layout();
+
+    const pulse=heartbeat(t);
+
+    const tipY=
+        getHeartBottom(
+            cx,
+            cy,
+            scale,
+            pulse
+        );
+
+    const floorY=
+        Math.min(
+            H*.82,
+            tipY+
+            Math.max(
+                25,
+                H*.12
+            )
+        );
+
+    drawBackground(t);
+
+    /*
+     * 顺序非常重要：
+     * 背景射线 -> 地面 -> 心体 glow -> 内部 -> 心粒子 -> 能量柱
+     */
+    drawRays(
+        t,
+        cx,
+        cy,
+        scale,
+        pulse
+    );
+
+    drawFloor(
+        t,
+        cx,
+        floorY
+    );
+
+    drawHeartGlow(
+        cx,
+        cy,
+        scale,
+        pulse
+    );
+
+    drawInterior(
+        t,
+        cx,
+        cy,
+        scale,
+        pulse
+    );
+
+    drawHeartParticles(
+        t,
+        cx,
+        cy,
+        scale,
+        pulse
+    );
+
+    drawHotContour(
+        cx,
+        cy,
+        scale,
+        pulse
+    );
+
+    drawStream(
+        t,
+        cx,
+        tipY,
+        floorY,
+        scale
+    );
+
+    drawVignette();
+}
+
+window.addEventListener(
+    "pointermove",
+    e=>{
+        targetMouseX=
+            (
+                e.clientX/W-.5
+            )*2;
+
+        targetMouseY=
+            (
+                e.clientY/H-.5
+            )*2;
+    },
+    {passive:true}
+);
+
+window.addEventListener(
+    "pointerleave",
     ()=>{
-
-        const mobile=
-            innerWidth<768;
-
-        camera.aspect=
-            innerWidth/
-            innerHeight;
-
-        camera.fov=
-            mobile?54:47;
-
-        camera.position.z=
-            mobile?41:37.5;
-
-        camera.updateProjectionMatrix();
-
-        renderer.setSize(
-            innerWidth,
-            innerHeight
-        );
-
-        composer.setSize(
-            innerWidth,
-            innerHeight
-        );
-
+        targetMouseX=0;
+        targetMouseY=0;
     }
 );
 
-const clock=
-    new THREE.Clock();
+let resizeTimer;
 
-let loaded=false;
-
-function animate(){
-
-    requestAnimationFrame(
-        animate
-    );
-
-    const t=
-        clock.getElapsedTime();
-
-    const beat=
-        heartbeat(t);
-
-    heartParticles
-    .bodyMaterial
-    .uniforms
-    .uTime
-    .value=t;
-
-    heartParticles
-    .bodyMaterial
-    .uniforms
-    .uBeat
-    .value=beat;
-
-    heartParticles
-    .haloMaterial
-    .uniforms
-    .uTime
-    .value=t;
-
-    heartParticles
-    .haloMaterial
-    .uniforms
-    .uBeat
-    .value=beat;
-
-    innerMaterial
-    .uniforms
-    .uTime
-    .value=t;
-
-    sparkMaterial
-    .uniforms
-    .uTime
-    .value=t;
-
-    fountainMaterial
-    .uniforms
-    .uTime
-    .value=t;
-
-    pointer.x+=
-        (
-            pointer.tx-
-            pointer.x
-        )*.025;
-
-    pointer.y+=
-        (
-            pointer.ty-
-            pointer.y
-        )*.025;
-
-    heartGroup.rotation.y=
-        pointer.x*.035+
-        Math.sin(t*.12)*.006;
-
-    heartGroup.rotation.x=
-        pointer.y*.014;
-
-    camera.position.x+=
-        (
-            pointer.x*.25-
-            camera.position.x
-        )*.025;
-
-    camera.position.y+=
-        (
-            2.5-
-            pointer.y*.12-
-            camera.position.y
-        )*.025;
-
-    camera.lookAt(
-        0,
-        .6,
-        0
-    );
-
-    floorRings.scale.setScalar(
-        1+
-        beat*.025+
-        Math.sin(t*.9)*.004
-    );
-
-    stars.rotation.z=
-        t*.0007;
-
-    rays.rotation.z=
-        Math.sin(t*.07)*.004;
-
-    composer.render();
-
-    if(!loaded){
-
-        loaded=true;
-
-        setTimeout(
-            ()=>{
-                document
-                .getElementById("loading")
-                .classList
-                .add("hide");
-            },
-            350
-        );
+window.addEventListener(
+    "resize",
+    ()=>{
+        clearTimeout(resizeTimer);
+        resizeTimer=setTimeout(resize,100);
     }
-}
+);
 
-animate();
+buildCurve();
+createSprites();
+resize();
+
+requestAnimationFrame(frame);
+
+})();
 </script>
 </body>
 </html>
