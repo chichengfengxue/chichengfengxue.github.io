@@ -6,1438 +6,868 @@
 <title>Love</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#05030b}
-body{
-    background:
-        radial-gradient(circle at 50% 44%,rgba(82,20,77,.24) 0%,rgba(25,8,40,.12) 35%,rgba(5,3,11,0) 62%),
-        radial-gradient(circle at 50% 100%,rgba(64,24,90,.16),transparent 48%),
-        #05030b;
-}
-canvas{position:fixed;inset:0;display:block;width:100%;height:100%}
-.home{
-    position:fixed;
-    z-index:10;
-    left:24px;
-    top:22px;
-    color:rgba(255,230,244,.32);
-    text-decoration:none;
-    font:11px/1 Arial,sans-serif;
-    letter-spacing:3px;
-    transition:.35s;
-    user-select:none;
-}
-.home:hover{
-    color:rgba(255,230,244,.9);
-    text-shadow:0 0 14px rgba(255,130,210,.8);
-}
-.loading{
-    position:fixed;
-    inset:0;
-    z-index:20;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    pointer-events:none;
-    color:rgba(255,210,235,.55);
-    background:#05030b;
-    font:10px Arial,sans-serif;
-    letter-spacing:5px;
-    transition:opacity 1.2s ease;
-}
-.loading.hide{opacity:0}
-@media(max-width:768px){
-    .home{left:17px;top:17px;font-size:9px}
-}
+html,body{width:100%;height:100%;overflow:hidden;background:#050208}
+body{background:radial-gradient(circle at 50% 43%,#241024 0,#0d0613 35%,#050208 72%)}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#loading{position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;background:#050208;color:#df9bc9;font:11px Arial;letter-spacing:8px;transition:opacity 1.2s;pointer-events:none}
+#loading.hide{opacity:0}
+.home{position:fixed;top:22px;left:25px;z-index:20;color:rgba(255,220,240,.35);text-decoration:none;font:10px Arial;letter-spacing:3px;transition:.4s}
+.home:hover{color:#ffe4f4;text-shadow:0 0 16px #ff77c8}
 </style>
-
 <script type="importmap">
 {
-    "imports":{
-        "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-    }
+  "imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
 }
 </script>
 </head>
 <body>
-
 <a class="home" href="/">HOME</a>
-<div class="loading" id="loading">LOVE</div>
-
+<div id="loading">LOVE</div>
 <script type="module">
 import * as THREE from "three";
+import {GPUComputationRenderer} from "three/addons/misc/GPUComputationRenderer.js";
 import {EffectComposer} from "three/addons/postprocessing/EffectComposer.js";
 import {RenderPass} from "three/addons/postprocessing/RenderPass.js";
 import {UnrealBloomPass} from "three/addons/postprocessing/UnrealBloomPass.js";
 import {OutputPass} from "three/addons/postprocessing/OutputPass.js";
 
-const MOBILE=window.innerWidth<768;
-const CONFIG={
-    mainCount:MOBILE?26000:50000,
-    auraCount:MOBILE?5000:12000,
-    streamCount:MOBILE?2600:6500,
-    starCount:MOBILE?700:1800,
-    floorCount:MOBILE?2600:5500,
-    rayCount:MOBILE?45:100,
-    pixelRatio:Math.min(window.devicePixelRatio||1,MOBILE?1.35:1.8)
-};
-
+const MOBILE=innerWidth<768;
+const SIM_SIZE=MOBILE?128:256;
+const PARTICLE_COUNT=SIM_SIZE*SIM_SIZE;
+const HEART_SCALE=MOBILE?8.5:9.6;
+const HEART_Y=1.7;
+const FLOOR_Y=-11.5;
+const LUT_SIZE=1024;
 const scene=new THREE.Scene();
-scene.fog=new THREE.FogExp2(0x05030b,0.013);
+scene.background=new THREE.Color(0x050208);
+scene.fog=new THREE.FogExp2(0x050208,.015);
 
-const camera=new THREE.PerspectiveCamera(
-    MOBILE?58:52,
-    innerWidth/innerHeight,
-    .1,
-    250
-);
+const camera=new THREE.PerspectiveCamera(MOBILE?56:48,innerWidth/innerHeight,.1,150);
+camera.position.set(0,3.6,MOBILE?43:39);
+camera.lookAt(0,0,0);
 
-camera.position.set(0,MOBILE?2.5:2.0,MOBILE?54:43);
-
-const renderer=new THREE.WebGLRenderer({
-    antialias:false,
-    alpha:true,
-    powerPreference:"high-performance"
-});
-
-renderer.setPixelRatio(CONFIG.pixelRatio);
+const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:"high-performance"});
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,MOBILE?1.35:1.75));
 renderer.setSize(innerWidth,innerHeight);
-renderer.setClearColor(0x05030b,1);
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.08;
+renderer.toneMappingExposure=1.18;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 const composer=new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene,camera));
-
-const bloom=new UnrealBloomPass(
-    new THREE.Vector2(innerWidth,innerHeight),
-    1.9,
-    .78,
-    .03
-);
-
+const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),1.65,.72,.08);
 bloom.threshold=.02;
-bloom.strength=MOBILE?1.45:1.8;
-bloom.radius=.82;
-
+bloom.strength=MOBILE?1.3:1.65;
+bloom.radius=.78;
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
-const clock=new THREE.Clock();
-
 const heartGroup=new THREE.Group();
-heartGroup.position.y=2.2;
+heartGroup.position.y=HEART_Y;
 scene.add(heartGroup);
 
-function randomNormal(){
-    const u=1-Math.random();
-    const v=Math.random();
-    return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+function heartF(x,y){
+    const a=x*x+y*y-1;
+    return a*a*a-x*x*y*y*y;
 }
 
-function heartPoint(t){
-    const s=Math.sin(t);
-    return new THREE.Vector3(
-        16*s*s*s,
-        13*Math.cos(t)
-        -5*Math.cos(2*t)
-        -2*Math.cos(3*t)
-        -Math.cos(4*t),
-        0
-    );
-}
-
-function makeColor(type,rnd,t,scale){
-    const c=new THREE.Color();
-
-    if(type==="aura"){
-        if(rnd<.45)c.setRGB(.92,.25,.76);
-        else if(rnd<.78)c.setRGB(.72,.25,1);
-        else c.setRGB(1,.48,.84);
-
-        c.multiplyScalar(.55+Math.random()*.3);
-        return c;
+function heartRadius(theta){
+    let lo=0,hi=3;
+    for(let i=0;i<42;i++){
+        const mid=(lo+hi)*.5;
+        const x=Math.cos(theta)*mid;
+        const y=Math.sin(theta)*mid;
+        if(heartF(x,y)>0)hi=mid;
+        else lo=mid;
     }
-
-    const nearDip=
-        Math.abs(Math.sin(t))<.18 &&
-        Math.cos(t)>.25;
-
-    const hot=Math.random();
-
-    if(nearDip||hot<.22){
-        c.setRGB(1,.88,.96);
-    }else if(hot<.52){
-        c.setRGB(1,.53,.81);
-    }else if(hot<.84){
-        c.setRGB(.95,.31,.72);
-    }else{
-        c.setRGB(.75,.28,1);
-    }
-
-    if(scale>.98)c.lerp(new THREE.Color(1,.82,.94),.25);
-
-    return c;
+    return (lo+hi)*.5;
 }
 
-const heartVertex=`
-attribute float aSize;
-attribute float aSeed;
-attribute float aAlpha;
-attribute vec3 color;
+const lutData=new Float32Array(LUT_SIZE*4);
+const lutRadius=new Float32Array(LUT_SIZE);
+for(let i=0;i<LUT_SIZE;i++){
+    const theta=i/LUT_SIZE*Math.PI*2-Math.PI;
+    const r=heartRadius(theta)*HEART_SCALE;
+    lutRadius[i]=r;
+    lutData[i*4]=r;
+    lutData[i*4+1]=r;
+    lutData[i*4+2]=r;
+    lutData[i*4+3]=1;
+}
+const heartLUT=new THREE.DataTexture(lutData,LUT_SIZE,1,THREE.RGBAFormat,THREE.FloatType);
+heartLUT.needsUpdate=true;
+heartLUT.minFilter=THREE.LinearFilter;
+heartLUT.magFilter=THREE.LinearFilter;
+heartLUT.wrapS=THREE.RepeatWrapping;
+heartLUT.wrapT=THREE.ClampToEdgeWrapping;
 
+function getRadius(theta){
+    let u=(theta+Math.PI)/(Math.PI*2);
+    u=((u%1)+1)%1;
+    const f=u*LUT_SIZE;
+    const a=Math.floor(f)%LUT_SIZE;
+    const b=(a+1)%LUT_SIZE;
+    const t=f-Math.floor(f);
+    return THREE.MathUtils.lerp(lutRadius[a],lutRadius[b],t);
+}
+
+const gpu=new GPUComputationRenderer(SIM_SIZE,SIM_SIZE,renderer);
+if(MOBILE)gpu.setDataType(THREE.HalfFloatType);
+
+const posTex=gpu.createTexture();
+const velTex=gpu.createTexture();
+
+function fillTextures(){
+    const p=posTex.image.data;
+    const v=velTex.image.data;
+    for(let i=0;i<PARTICLE_COUNT;i++){
+        const theta=Math.random()*Math.PI*2-Math.PI;
+        const radius=getRadius(theta);
+        const band=(Math.random()-.5)*(Math.random()<.83?1.15:2.5);
+        const rr=radius+band;
+        const x=Math.cos(theta)*rr;
+        const y=Math.sin(theta)*rr;
+        const z=(Math.random()-.5)*(Math.random()<.85?2.4:5.5);
+        const j=i*4;
+        p[j]=x;
+        p[j+1]=y;
+        p[j+2]=z;
+        p[j+3]=Math.random();
+        const tangent=new THREE.Vector2(-Math.sin(theta),Math.cos(theta));
+        const speed=.55+Math.random()*.65;
+        v[j]=tangent.x*speed+(Math.random()-.5)*.25;
+        v[j+1]=tangent.y*speed+(Math.random()-.5)*.25;
+        v[j+2]=(Math.random()-.5)*.15;
+        v[j+3]=Math.random();
+    }
+}
+fillTextures();
+
+const velocityShader=`
+uniform sampler2D texturePosition;
+uniform sampler2D textureVelocity;
+uniform sampler2D uHeartLUT;
 uniform float uTime;
-uniform float uBeat;
+uniform float uDelta;
 
-varying vec3 vColor;
-varying float vAlpha;
-varying float vSeed;
+#define PI 3.14159265359
+#define TAU 6.28318530718
+
+float hash(vec2 p){
+    return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);
+}
 
 void main(){
-    vec3 p=position;
+    vec2 uv=gl_FragCoord.xy/resolution.xy;
+    vec4 pd=texture2D(texturePosition,uv);
+    vec4 vd=texture2D(textureVelocity,uv);
+    vec3 p=pd.xyz;
+    vec3 vel=vd.xyz;
 
-    float n1=sin(
-        p.x*.62+
-        uTime*1.10+
-        aSeed*12.0
-    );
+    float theta=atan(p.y,p.x);
+    float u=(theta+PI)/TAU;
 
-    float n2=cos(
-        p.y*.57-
-        uTime*.86+
-        aSeed*9.0
-    );
+    float r=texture2D(uHeartLUT,vec2(fract(u),.5)).r;
+    float eps=1.0/1024.0;
+    float r2=texture2D(uHeartLUT,vec2(fract(u+eps),.5)).r;
 
-    float n3=sin(
-        (p.x+p.y)*.26+
-        uTime*.55+
-        aSeed*17.0
-    );
+    vec2 dir=vec2(cos(theta),sin(theta));
+    vec2 dir2=vec2(cos(theta+eps*TAU),sin(theta+eps*TAU));
 
-    float breathe=
-        1.0+
-        uBeat*.032+
-        sin(uTime*.72)*.007;
+    vec2 target=dir*r;
+    vec2 target2=dir2*r2;
 
-    p.xy*=breathe;
+    vec2 tangent=normalize(target2-target);
+    vec2 attract=target-p.xy;
 
-    p.x+=n1*.075+n3*.035;
-    p.y+=n2*.070+n3*.025;
-    p.z+=sin(uTime*.65+aSeed*15.0)*.11;
+    float dist=length(attract);
+    float band=exp(-dist*dist*.35);
 
-    vec4 mv=modelViewMatrix*vec4(p,1.0);
+    float n1=sin(p.y*.56+uTime*1.15+uv.x*19.0);
+    float n2=cos(p.x*.48-uTime*.93+uv.y*23.0);
+    float n3=sin((p.x+p.y)*.31+uTime*.72+hash(uv)*8.0);
 
-    float perspective=
-        260.0/
-        max(8.0,-mv.z);
+    vec2 turbulence=vec2(n1+n3*.45,n2-n3*.42);
 
-    gl_PointSize=
-        clamp(
-            aSize*perspective,
-            .55,
-            7.0
-        );
+    float flow=.72+band*.82;
+    vel.xy+=tangent*flow*uDelta;
+    vel.xy+=attract*(.52+band*.38)*uDelta;
+    vel.xy+=turbulence*.32*uDelta;
 
-    gl_Position=
-        projectionMatrix*mv;
+    float centerBurst=exp(-p.x*p.x*.30)*exp(-(p.y-4.6)*(p.y-4.6)*.22);
+    vel.y-=centerBurst*.24*uDelta;
+    vel.x+=sin(uTime*2.1+uv.y*31.0)*centerBurst*.20*uDelta;
 
-    vColor=color;
-    vAlpha=aAlpha;
-    vSeed=aSeed;
+    float tipBurst=exp(-p.x*p.x*.42)*exp(-(p.y+8.4)*(p.y+8.4)*.25);
+    vel.y-=tipBurst*.42*uDelta;
+
+    vel.z+=(-p.z*.62+sin(uTime*.85+uv.x*29.0+uv.y*17.0)*.26)*uDelta;
+
+    float damping=pow(.982,uDelta*60.0);
+    vel*=damping;
+
+    float maxSpeed=2.5;
+    float sp=length(vel);
+    if(sp>maxSpeed)vel*=maxSpeed/sp;
+
+    gl_FragColor=vec4(vel,vd.w);
 }
 `;
 
-const heartFragment=`
-precision highp float;
+const positionShader=`
+uniform sampler2D texturePosition;
+uniform sampler2D textureVelocity;
+uniform sampler2D uHeartLUT;
+uniform float uTime;
+uniform float uDelta;
 
-varying vec3 vColor;
-varying float vAlpha;
-varying float vSeed;
+#define PI 3.14159265359
+#define TAU 6.28318530718
+
+float hash(vec2 p){
+    return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);
+}
 
 void main(){
-    vec2 uv=
-        gl_PointCoord-
-        vec2(.5);
+    vec2 uv=gl_FragCoord.xy/resolution.xy;
+    vec4 pd=texture2D(texturePosition,uv);
+    vec3 p=pd.xyz;
+    float life=pd.w;
+    vec3 vel=texture2D(textureVelocity,uv).xyz;
 
-    float d=length(uv);
+    life+=uDelta*(.020+hash(uv)*.020);
+    p+=vel*uDelta;
 
-    if(d>.5)discard;
+    if(life>1.0||length(p.xy)>18.0||abs(p.z)>8.0){
+        float cycle=floor(uTime*.47);
+        float h=hash(uv+vec2(cycle*.071,cycle*.137));
+        float theta=h*TAU-PI;
+        float r=texture2D(uHeartLUT,vec2(h,.5)).r;
 
-    float core=
-        1.0-
-        smoothstep(
-            .0,
-            .5,
-            d
+        float h2=hash(uv.yx+vec2(cycle*.193,cycle*.311));
+        float h3=hash(uv+vec2(cycle*.417,cycle*.223));
+
+        float band=(h2-.5)*(h3<.82?1.15:2.4);
+        float rr=r+band;
+
+        p=vec3(
+            cos(theta)*rr,
+            sin(theta)*rr,
+            (h3-.5)*(h2<.85?2.5:5.0)
         );
 
-    float soft=
-        pow(core,2.3);
+        life=0.0;
+    }
 
-    float hot=
-        pow(
-            max(
-                0.0,
-                1.0-d*4.2
-            ),
-            3.0
-        );
-
-    vec3 col=
-        mix(
-            vColor,
-            vec3(1.0,.93,.98),
-            hot*.7
-        );
-
-    gl_FragColor=
-        vec4(
-            col,
-            soft*vAlpha
-        );
+    gl_FragColor=vec4(p,life);
 }
 `;
 
-function createHeartSystem(count,type){
-    const pos=new Float32Array(count*3);
-    const colors=new Float32Array(count*3);
-    const sizes=new Float32Array(count);
-    const seeds=new Float32Array(count);
-    const alphas=new Float32Array(count);
+const velVar=gpu.addVariable("textureVelocity",velocityShader,velTex);
+const posVar=gpu.addVariable("texturePosition",positionShader,posTex);
 
-    for(let i=0;i<count;i++){
-        const t=Math.random()*Math.PI*2;
-        const hp=heartPoint(t);
+gpu.setVariableDependencies(velVar,[velVar,posVar]);
+gpu.setVariableDependencies(posVar,[velVar,posVar]);
 
-        let scale;
-        let spread;
-        let zSpread;
+velVar.material.uniforms.uTime={value:0};
+velVar.material.uniforms.uDelta={value:.016};
+velVar.material.uniforms.uHeartLUT={value:heartLUT};
 
-        if(type==="aura"){
-            scale=
-                1.0+
-                Math.pow(
-                    Math.random(),
-                    1.7
-                )*.18;
+posVar.material.uniforms.uTime={value:0};
+posVar.material.uniforms.uDelta={value:.016};
+posVar.material.uniforms.uHeartLUT={value:heartLUT};
 
-            spread=1.55;
-            zSpread=6.8;
-        }else{
-            const mode=Math.random();
+const gpuError=gpu.init();
+if(gpuError){
+    console.error(gpuError);
+    document.getElementById("loading").textContent="WEBGL ERROR";
+    throw new Error(gpuError);
+}
 
-            if(mode<.73){
-                scale=
-                    .80+
-                    Math.pow(
-                        Math.random(),
-                        .20
-                    )*.225;
-            }else if(mode<.91){
-                scale=
-                    .35+
-                    Math.sqrt(
-                        Math.random()
-                    )*.54;
-            }else{
-                scale=
-                    1.0+
-                    Math.random()*.055;
-            }
-
-            spread=
-                mode<.73
-                    ?.55
-                    :.85;
-
-            zSpread=
-                2.5+
-                (1-scale)*2.5;
-        }
-
-        const i3=i*3;
-
-        pos[i3]=
-            hp.x*scale+
-            randomNormal()*spread*.33;
-
-        pos[i3+1]=
-            hp.y*scale+
-            randomNormal()*spread*.31;
-
-        pos[i3+2]=
-            randomNormal()*
-            zSpread*.32;
-
-        const c=
-            makeColor(
-                type,
-                Math.random(),
-                t,
-                scale
-            );
-
-        colors[i3]=c.r;
-        colors[i3+1]=c.g;
-        colors[i3+2]=c.b;
-
-        if(type==="aura"){
-            sizes[i]=
-                .16+
-                Math.pow(
-                    Math.random(),
-                    2
-                )*.38;
-
-            alphas[i]=
-                .07+
-                Math.random()*.13;
-        }else{
-            const r=Math.random();
-
-            sizes[i]=
-                r<.86
-                    ?.07+
-                    Math.random()*.11
-                    :.15+
-                    Math.random()*.16;
-
-            alphas[i]=
-                .34+
-                Math.random()*.58;
-        }
-
+const references=new Float32Array(PARTICLE_COUNT*2);
+const seeds=new Float32Array(PARTICLE_COUNT);
+for(let y=0;y<SIM_SIZE;y++){
+    for(let x=0;x<SIM_SIZE;x++){
+        const i=y*SIM_SIZE+x;
+        references[i*2]=(x+.5)/SIM_SIZE;
+        references[i*2+1]=(y+.5)/SIM_SIZE;
         seeds[i]=Math.random();
     }
-
-    const geometry=
-        new THREE.BufferGeometry();
-
-    geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(pos,3)
-    );
-
-    geometry.setAttribute(
-        "color",
-        new THREE.BufferAttribute(colors,3)
-    );
-
-    geometry.setAttribute(
-        "aSize",
-        new THREE.BufferAttribute(sizes,1)
-    );
-
-    geometry.setAttribute(
-        "aSeed",
-        new THREE.BufferAttribute(seeds,1)
-    );
-
-    geometry.setAttribute(
-        "aAlpha",
-        new THREE.BufferAttribute(alphas,1)
-    );
-
-    const material=
-        new THREE.ShaderMaterial({
-            vertexShader:heartVertex,
-            fragmentShader:heartFragment,
-
-            uniforms:{
-                uTime:{value:0},
-                uBeat:{value:0}
-            },
-
-            vertexColors:true,
-            transparent:true,
-            depthWrite:false,
-            depthTest:true,
-
-            blending:
-                THREE.AdditiveBlending
-        });
-
-    const points=
-        new THREE.Points(
-            geometry,
-            material
-        );
-
-    points.frustumCulled=false;
-
-    heartGroup.add(points);
-
-    return {
-        points,
-        material
-    };
 }
 
-const mainHeart=
-    createHeartSystem(
-        CONFIG.mainCount,
-        "main"
-    );
+const particleGeometry=new THREE.BufferGeometry();
+particleGeometry.setAttribute("position",new THREE.BufferAttribute(new Float32Array(PARTICLE_COUNT*3),3));
+particleGeometry.setAttribute("reference",new THREE.BufferAttribute(references,2));
+particleGeometry.setAttribute("aSeed",new THREE.BufferAttribute(seeds,1));
 
-const auraHeart=
-    createHeartSystem(
-        CONFIG.auraCount,
-        "aura"
-    );
+const particleVertex=`
+attribute vec2 reference;
+attribute float aSeed;
 
-/* ============================
-   OUTWARD STREAM PARTICLES
-============================ */
-
-const streamVertex=`
-attribute vec3 aStart;
-attribute vec3 aDirection;
-attribute float aPhase;
-attribute float aSpeed;
-attribute float aSize;
-attribute float aAlpha;
-attribute vec3 color;
-
+uniform sampler2D texturePosition;
+uniform sampler2D textureVelocity;
+uniform float uPixelRatio;
 uniform float uTime;
+uniform float uSizeMul;
+uniform float uAlphaMul;
 
 varying vec3 vColor;
 varying float vAlpha;
 
 void main(){
-    float q=
-        fract(
-            aPhase+
-            uTime*aSpeed
-        );
+    vec4 pd=texture2D(texturePosition,reference);
+    vec3 p=pd.xyz;
+    vec3 vel=texture2D(textureVelocity,reference).xyz;
 
-    float travel=
-        pow(q,1.45);
+    float speed=length(vel);
+    float life=pd.w;
 
-    vec3 p=
-        aStart+
-        aDirection*
-        travel*
-        18.0;
+    float fadeIn=smoothstep(0.0,.055,life);
+    float fadeOut=1.0-smoothstep(.78,1.0,life);
+    float lifeFade=fadeIn*fadeOut;
 
-    p.x+=
-        sin(
-            uTime*3.0+
-            aPhase*20.0
-        )*.10*q;
+    float hotSeed=smoothstep(.935,1.0,aSeed);
+    float speedHot=smoothstep(.8,1.9,speed);
 
-    p.y+=
-        cos(
-            uTime*2.3+
-            aPhase*15.0
-        )*.08*q;
+    float pinch=
+        exp(-p.x*p.x*.62)*
+        exp(-(p.y-4.5)*(p.y-4.5)*.42);
 
-    vec4 mv=
-        modelViewMatrix*
-        vec4(p,1.0);
+    float tip=
+        exp(-p.x*p.x*.45)*
+        exp(-(p.y+8.4)*(p.y+8.4)*.35);
 
-    gl_PointSize=
-        clamp(
-            aSize*
-            270.0/
-            max(8.0,-mv.z),
-            .45,
-            4.0
-        );
+    float hot=clamp(hotSeed*.65+speedHot*.28+pinch*.85+tip*.55,0.0,1.0);
 
-    gl_Position=
-        projectionMatrix*mv;
+    vec3 purple=vec3(.67,.18,.72);
+    vec3 pink=vec3(1.0,.34,.72);
+    vec3 pale=vec3(1.0,.72,.89);
+    vec3 white=vec3(1.0,.96,1.0);
+
+    vec3 color=mix(purple,pink,.54+.25*sin(aSeed*17.0));
+    color=mix(color,pale,smoothstep(.25,.72,hot));
+    color=mix(color,white,smoothstep(.68,1.0,hot));
+
+    float twinkle=.78+.22*sin(uTime*(2.0+aSeed*2.0)+aSeed*40.0);
+
+    vec4 mv=modelViewMatrix*vec4(p,1.0);
+    float perspective=34.0/max(6.0,-mv.z);
+
+    float baseSize=.72+pow(aSeed,8.0)*1.7+hot*.42;
+    gl_PointSize=clamp(baseSize*uSizeMul*uPixelRatio*perspective,.45,8.0);
+    gl_Position=projectionMatrix*mv;
 
     vColor=color;
-
-    vAlpha=
-        aAlpha*
-        pow(
-            1.0-q,
-            1.4
-        );
+    vAlpha=(.34+hot*.60)*lifeFade*twinkle*uAlphaMul;
 }
 `;
 
-const streamFragment=`
+const particleFragment=`
 precision highp float;
+
+uniform float uSoft;
+uniform vec3 uTint;
 
 varying vec3 vColor;
 varying float vAlpha;
 
 void main(){
-    vec2 p=
-        gl_PointCoord-
-        .5;
-
-    float d=
-        length(p);
-
+    vec2 p=gl_PointCoord-.5;
+    float d=length(p);
     if(d>.5)discard;
 
-    float a=
-        pow(
-            1.0-
-            d*2.0,
-            2.0
-        );
+    float sharp=exp(-d*d*42.0);
+    float soft=exp(-d*d*10.0);
+    float alpha=mix(sharp,soft,uSoft)*vAlpha;
 
-    gl_FragColor=
-        vec4(
-            vColor,
-            a*vAlpha
-        );
+    gl_FragColor=vec4(vColor*uTint,alpha);
 }
 `;
 
-function createStreams(){
-    const n=CONFIG.streamCount;
-
-    const starts=new Float32Array(n*3);
-    const dirs=new Float32Array(n*3);
-    const colors=new Float32Array(n*3);
-
-    const phase=new Float32Array(n);
-    const speed=new Float32Array(n);
-    const size=new Float32Array(n);
-    const alpha=new Float32Array(n);
-
-    for(let i=0;i<n;i++){
-        const t=Math.random()*Math.PI*2;
-        const hp=heartPoint(t);
-
-        const scale=
-            .92+
-            Math.random()*.10;
-
-        const x=
-            hp.x*scale+
-            randomNormal()*.35;
-
-        const y=
-            hp.y*scale+
-            randomNormal()*.30;
-
-        const z=
-            randomNormal()*1.2;
-
-        const i3=i*3;
-
-        starts[i3]=x;
-        starts[i3+1]=y;
-        starts[i3+2]=z;
-
-        const dir=
-            new THREE.Vector3(
-                x,
-                y*.9,
-                z+randomNormal()*2
-            )
-            .normalize();
-
-        dir.x+=
-            randomNormal()*.11;
-
-        dir.y+=
-            randomNormal()*.11;
-
-        dir.z+=
-            randomNormal()*.13;
-
-        dirs[i3]=dir.x;
-        dirs[i3+1]=dir.y;
-        dirs[i3+2]=dir.z;
-
-        const c=
-            Math.random()<.48
-                ?new THREE.Color(
-                    1,
-                    .72,
-                    .90
-                )
-                :new THREE.Color(
-                    1,
-                    .35,
-                    .73
-                );
-
-        colors[i3]=c.r;
-        colors[i3+1]=c.g;
-        colors[i3+2]=c.b;
-
-        phase[i]=Math.random();
-
-        speed[i]=
-            .025+
-            Math.random()*.07;
-
-        size[i]=
-            .08+
-            Math.random()*.11;
-
-        alpha[i]=
-            .18+
-            Math.random()*.60;
-    }
-
-    const g=
-        new THREE.BufferGeometry();
-
-    g.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            new Float32Array(n*3),
-            3
-        )
-    );
-
-    g.setAttribute(
-        "aStart",
-        new THREE.BufferAttribute(starts,3)
-    );
-
-    g.setAttribute(
-        "aDirection",
-        new THREE.BufferAttribute(dirs,3)
-    );
-
-    g.setAttribute(
-        "color",
-        new THREE.BufferAttribute(colors,3)
-    );
-
-    g.setAttribute(
-        "aPhase",
-        new THREE.BufferAttribute(phase,1)
-    );
-
-    g.setAttribute(
-        "aSpeed",
-        new THREE.BufferAttribute(speed,1)
-    );
-
-    g.setAttribute(
-        "aSize",
-        new THREE.BufferAttribute(size,1)
-    );
-
-    g.setAttribute(
-        "aAlpha",
-        new THREE.BufferAttribute(alpha,1)
-    );
-
-    const m=
-        new THREE.ShaderMaterial({
-            vertexShader:streamVertex,
-            fragmentShader:streamFragment,
-
-            uniforms:{
-                uTime:{value:0}
-            },
-
-            transparent:true,
-            depthWrite:false,
-            blending:
-                THREE.AdditiveBlending
-        });
-
-    const p=
-        new THREE.Points(g,m);
-
-    p.frustumCulled=false;
-
-    heartGroup.add(p);
-
-    return {
-        points:p,
-        material:m
-    };
+function makeParticleMaterial(sizeMul,alphaMul,soft,tint){
+    return new THREE.ShaderMaterial({
+        vertexShader:particleVertex,
+        fragmentShader:particleFragment,
+        uniforms:{
+            texturePosition:{value:null},
+            textureVelocity:{value:null},
+            uPixelRatio:{value:renderer.getPixelRatio()},
+            uTime:{value:0},
+            uSizeMul:{value:sizeMul},
+            uAlphaMul:{value:alphaMul},
+            uSoft:{value:soft},
+            uTint:{value:new THREE.Color(tint)}
+        },
+        transparent:true,
+        depthWrite:false,
+        depthTest:true,
+        blending:THREE.AdditiveBlending
+    });
 }
 
-const streams=createStreams();
+const haloMat=makeParticleMaterial(4.6,.075,1,0xff54bb);
+const bodyMat=makeParticleMaterial(1,.95,.18,0xffffff);
 
-/* ============================
-   CENTRAL FALLING / RISING DUST
-============================ */
+const halo=new THREE.Points(particleGeometry,haloMat);
+const body=new THREE.Points(particleGeometry,bodyMat);
+halo.frustumCulled=false;
+body.frustumCulled=false;
+heartGroup.add(halo);
+heartGroup.add(body);
 
-function createFountain(){
-    const n=MOBILE?700:1700;
+const TRAIL_COUNT=MOBILE?2500:10000;
+const trailRefs=new Float32Array(TRAIL_COUNT*4);
+const trailEnds=new Float32Array(TRAIL_COUNT*2);
+const trailSeeds=new Float32Array(TRAIL_COUNT*2);
 
-    const position=
-        new Float32Array(n*3);
+for(let i=0;i<TRAIL_COUNT;i++){
+    const particleIndex=(i*5)%PARTICLE_COUNT;
+    const rx=references[particleIndex*2];
+    const ry=references[particleIndex*2+1];
+    trailRefs[i*4]=rx;
+    trailRefs[i*4+1]=ry;
+    trailRefs[i*4+2]=rx;
+    trailRefs[i*4+3]=ry;
+    trailEnds[i*2]=0;
+    trailEnds[i*2+1]=1;
+    trailSeeds[i*2]=seeds[particleIndex];
+    trailSeeds[i*2+1]=seeds[particleIndex];
+}
 
-    const color=
-        new Float32Array(n*3);
+const trailGeometry=new THREE.BufferGeometry();
+trailGeometry.setAttribute("position",new THREE.BufferAttribute(new Float32Array(TRAIL_COUNT*6),3));
+trailGeometry.setAttribute("reference",new THREE.BufferAttribute(trailRefs,2));
+trailGeometry.setAttribute("aEnd",new THREE.BufferAttribute(trailEnds,1));
+trailGeometry.setAttribute("aSeed",new THREE.BufferAttribute(trailSeeds,1));
 
-    for(let i=0;i<n;i++){
-        const q=Math.random();
+const trailVertex=`
+attribute vec2 reference;
+attribute float aEnd;
+attribute float aSeed;
 
-        const radius=
-            (1-q)*
-            (1-q)*
-            1.8;
+uniform sampler2D texturePosition;
+uniform sampler2D textureVelocity;
 
-        const a=
-            Math.random()*
-            Math.PI*2;
+varying vec3 vColor;
+varying float vAlpha;
 
-        position[i*3]=
-            Math.cos(a)*
-            radius;
+void main(){
+    vec4 pd=texture2D(texturePosition,reference);
+    vec3 vel=texture2D(textureVelocity,reference).xyz;
+    vec3 p=pd.xyz-vel*aEnd*(.12+length(vel)*.085);
 
-        position[i*3+1]=
-            -20.1+
-            q*6.3+
-            randomNormal()*.13;
+    float speed=length(vel);
+    float life=pd.w;
+    float fade=
+        smoothstep(.02,.10,life)*
+        (1.0-smoothstep(.72,1.0,life));
 
-        position[i*3+2]=
-            Math.sin(a)*
-            radius*.45;
+    vec3 pink=vec3(1.0,.31,.72);
+    vec3 white=vec3(1.0,.86,.96);
+    float hot=smoothstep(.9,2.0,speed);
 
-        const c=
-            Math.random()<.5
-                ?new THREE.Color(
-                    1,.9,.97
-                )
-                :new THREE.Color(
-                    1,.36,.77
-                );
+    vColor=mix(pink,white,hot*.72);
+    vAlpha=(1.0-aEnd*.73)*fade*(.09+hot*.12);
 
-        color[i*3]=c.r;
-        color[i*3+1]=c.g;
-        color[i*3+2]=c.b;
+    gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
+}
+`;
+
+const trailFragment=`
+precision highp float;
+varying vec3 vColor;
+varying float vAlpha;
+void main(){
+    gl_FragColor=vec4(vColor,vAlpha);
+}
+`;
+
+const trailMat=new THREE.ShaderMaterial({
+    vertexShader:trailVertex,
+    fragmentShader:trailFragment,
+    uniforms:{
+        texturePosition:{value:null},
+        textureVelocity:{value:null}
+    },
+    transparent:true,
+    depthWrite:false,
+    blending:THREE.AdditiveBlending
+});
+
+const trails=new THREE.LineSegments(trailGeometry,trailMat);
+trails.frustumCulled=false;
+heartGroup.add(trails);
+
+function createStars(){
+    const count=MOBILE?1000:2600;
+    const pos=new Float32Array(count*3);
+    const col=new Float32Array(count*3);
+    for(let i=0;i<count;i++){
+        pos[i*3]=(Math.random()-.5)*90;
+        pos[i*3+1]=(Math.random()-.5)*60;
+        pos[i*3+2]=-7-Math.random()*52;
+        const b=.25+Math.random()*.5;
+        col[i*3]=b;
+        col[i*3+1]=b*.47;
+        col[i*3+2]=b*.82;
     }
-
-    const g=
-        new THREE.BufferGeometry();
-
-    g.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            position,
-            3
-        )
-    );
-
-    g.setAttribute(
-        "color",
-        new THREE.BufferAttribute(
-            color,
-            3
-        )
-    );
-
-    const m=
-        new THREE.PointsMaterial({
-            size:.13,
-            vertexColors:true,
-            transparent:true,
-            opacity:.8,
-            depthWrite:false,
-            blending:
-                THREE.AdditiveBlending
-        });
-
+    const g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.BufferAttribute(pos,3));
+    g.setAttribute("color",new THREE.BufferAttribute(col,3));
+    const m=new THREE.PointsMaterial({
+        size:.065,
+        vertexColors:true,
+        transparent:true,
+        opacity:.62,
+        depthWrite:false,
+        blending:THREE.AdditiveBlending
+    });
     const p=new THREE.Points(g,m);
-
-    p.position.y=2.2;
-
     scene.add(p);
-
     return p;
 }
+const stars=createStars();
 
-const fountain=
-    createFountain();
+function createRays(){
+    const count=MOBILE?50:120;
+    const pos=[];
+    for(let i=0;i<count;i++){
+        const a=Math.random()*Math.PI*2;
+        const start=12+Math.random()*7;
+        const len=5+Math.random()*18;
+        const yScale=.82;
+        const z=-5-Math.random()*8;
+        pos.push(
+            Math.cos(a)*start,
+            Math.sin(a)*start*yScale+HEART_Y,
+            z,
+            Math.cos(a)*(start+len),
+            Math.sin(a)*(start+len)*yScale+HEART_Y,
+            z
+        );
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));
+    const m=new THREE.LineBasicMaterial({
+        color:0xc64b9f,
+        transparent:true,
+        opacity:.075,
+        depthWrite:false,
+        blending:THREE.AdditiveBlending
+    });
+    const lines=new THREE.LineSegments(g,m);
+    scene.add(lines);
+    return lines;
+}
+const rays=createRays();
 
-/* ============================
-   FLOOR PARTICLE FIELD
-============================ */
-
-function createFloor(){
-    const positions=[];
-    const colors=[];
-
-    const rings=30;
+function createGround(){
+    const group=new THREE.Group();
+    const linePos=[];
+    const rings=34;
 
     for(let ring=1;ring<=rings;ring++){
-        const radius=
-            .85+
-            Math.pow(
-                ring/rings,
-                1.26
-            )*34;
-
-        const count=
-            Math.floor(
-                20+
-                radius*5.0
-            );
-
-        for(let j=0;j<count;j++){
-            const a=
-                j/count*
-                Math.PI*2+
-                (ring%2)*.035;
-
-            positions.push(
-                Math.cos(a)*radius,
-                -18.2,
-                Math.sin(a)*radius
-            );
-
-            const bright=
-                Math.max(
-                    .08,
-                    1-ring/rings
-                );
-
-            colors.push(
-                .72+.28*bright,
-                .34+.38*bright,
-                .9
+        const r=.65+Math.pow(ring/rings,1.18)*30;
+        const segments=100;
+        for(let i=0;i<segments;i++){
+            const a=i/segments*Math.PI*2;
+            const b=(i+1)/segments*Math.PI*2;
+            linePos.push(
+                Math.cos(a)*r,FLOOR_Y,Math.sin(a)*r,
+                Math.cos(b)*r,FLOOR_Y,Math.sin(b)*r
             );
         }
     }
 
-    while(
-        positions.length/3<
-        CONFIG.floorCount
-    ){
-        const radius=
-            Math.sqrt(
-                Math.random()
-            )*35;
-
-        const a=
-            Math.random()*
-            Math.PI*2;
-
-        positions.push(
-            Math.cos(a)*radius,
-            -18.2+
-            (Math.random()-.5)*.025,
-            Math.sin(a)*radius
-        );
-
-        colors.push(
-            .7,
-            .32,
-            .92
+    const spokes=60;
+    for(let i=0;i<spokes;i++){
+        const a=i/spokes*Math.PI*2;
+        linePos.push(
+            0,FLOOR_Y,0,
+            Math.cos(a)*31,FLOOR_Y,Math.sin(a)*31
         );
     }
 
-    const g=
-        new THREE.BufferGeometry();
+    const lg=new THREE.BufferGeometry();
+    lg.setAttribute("position",new THREE.Float32BufferAttribute(linePos,3));
 
-    g.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            positions,
-            3
-        )
-    );
+    const lm=new THREE.LineBasicMaterial({
+        color:0x8f4aa7,
+        transparent:true,
+        opacity:.045,
+        depthWrite:false,
+        blending:THREE.AdditiveBlending
+    });
 
-    g.setAttribute(
-        "color",
-        new THREE.Float32BufferAttribute(
-            colors,
-            3
-        )
-    );
+    group.add(new THREE.LineSegments(lg,lm));
 
-    const m=
-        new THREE.PointsMaterial({
-            size:.055,
-            sizeAttenuation:true,
-            vertexColors:true,
+    const pointCount=MOBILE?3500:8500;
+    const pp=new Float32Array(pointCount*3);
+    const pc=new Float32Array(pointCount*3);
+
+    for(let i=0;i<pointCount;i++){
+        const radius=Math.sqrt(Math.random())*30;
+        const a=Math.random()*Math.PI*2;
+        pp[i*3]=Math.cos(a)*radius;
+        pp[i*3+1]=FLOOR_Y+(Math.random()-.5)*.02;
+        pp[i*3+2]=Math.sin(a)*radius;
+
+        const near=1-radius/30;
+        pc[i*3]=.45+.45*near;
+        pc[i*3+1]=.18+.28*near;
+        pc[i*3+2]=.62+.34*near;
+    }
+
+    const pg=new THREE.BufferGeometry();
+    pg.setAttribute("position",new THREE.BufferAttribute(pp,3));
+    pg.setAttribute("color",new THREE.BufferAttribute(pc,3));
+
+    const pm=new THREE.PointsMaterial({
+        size:.045,
+        vertexColors:true,
+        transparent:true,
+        opacity:.52,
+        depthWrite:false,
+        blending:THREE.AdditiveBlending
+    });
+
+    group.add(new THREE.Points(pg,pm));
+
+    const ringGroup=new THREE.Group();
+    ringGroup.position.y=FLOOR_Y+.025;
+
+    for(let i=0;i<7;i++){
+        const r=.75+i*.58;
+        const pts=[];
+        for(let j=0;j<128;j++){
+            const a=j/128*Math.PI*2;
+            pts.push(new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r));
+        }
+        const rg=new THREE.BufferGeometry().setFromPoints(pts);
+        const rm=new THREE.LineBasicMaterial({
+            color:i<2?0xffb9e1:0xd663bd,
             transparent:true,
-            opacity:.33,
+            opacity:.24-i*.022,
             depthWrite:false,
-            blending:
-                THREE.AdditiveBlending
+            blending:THREE.AdditiveBlending
         });
+        ringGroup.add(new THREE.LineLoop(rg,rm));
+    }
 
-    const p=
-        new THREE.Points(g,m);
+    group.add(ringGroup);
+    scene.add(group);
+    return {group,ringGroup};
+}
+const ground=createGround();
 
+function createFountain(){
+    const count=MOBILE?1000:2800;
+    const g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.BufferAttribute(new Float32Array(count*3),3));
+
+    const phase=new Float32Array(count);
+    const radius=new Float32Array(count);
+    const angle=new Float32Array(count);
+    const seed=new Float32Array(count);
+
+    for(let i=0;i<count;i++){
+        phase[i]=Math.random();
+        radius[i]=Math.pow(Math.random(),2)*1.5;
+        angle[i]=Math.random()*Math.PI*2;
+        seed[i]=Math.random();
+    }
+
+    g.setAttribute("aPhase",new THREE.BufferAttribute(phase,1));
+    g.setAttribute("aRadius",new THREE.BufferAttribute(radius,1));
+    g.setAttribute("aAngle",new THREE.BufferAttribute(angle,1));
+    g.setAttribute("aSeed",new THREE.BufferAttribute(seed,1));
+
+    const vertex=`
+    attribute float aPhase;
+    attribute float aRadius;
+    attribute float aAngle;
+    attribute float aSeed;
+
+    uniform float uTime;
+    uniform float uPixelRatio;
+
+    varying float vAlpha;
+    varying vec3 vColor;
+
+    void main(){
+        float q=fract(aPhase+uTime*(.12+aSeed*.11));
+
+        float bottom=${FLOOR_Y.toFixed(3)};
+        float top=${(HEART_Y-8.3).toFixed(3)};
+
+        float y=mix(bottom,top,q);
+
+        float taper=1.0-q*.76;
+        float r=aRadius*taper;
+
+        float a=aAngle+uTime*(.15+aSeed*.2);
+
+        vec3 p=vec3(
+            cos(a)*r,
+            y,
+            sin(a)*r*.55
+        );
+
+        p.x+=sin(q*16.0+aSeed*15.0+uTime*1.7)*.10;
+        p.z+=cos(q*13.0+aSeed*9.0+uTime*1.2)*.07;
+
+        vec4 mv=modelViewMatrix*vec4(p,1.0);
+
+        gl_PointSize=
+            clamp(
+                (1.0+aSeed*1.2)*
+                uPixelRatio*
+                34.0/max(7.0,-mv.z),
+                .5,
+                3.2
+            );
+
+        gl_Position=projectionMatrix*mv;
+
+        float middle=sin(q*3.14159265);
+        vAlpha=middle*(.2+aSeed*.65);
+
+        vColor=mix(
+            vec3(1.0,.30,.71),
+            vec3(1.0,.92,.98),
+            pow(aSeed,3.0)
+        );
+    }`;
+
+    const fragment=`
+    precision highp float;
+    varying float vAlpha;
+    varying vec3 vColor;
+    void main(){
+        vec2 p=gl_PointCoord-.5;
+        float d=length(p);
+        if(d>.5)discard;
+        float a=exp(-d*d*25.0)*vAlpha;
+        gl_FragColor=vec4(vColor,a);
+    }`;
+
+    const m=new THREE.ShaderMaterial({
+        vertexShader:vertex,
+        fragmentShader:fragment,
+        uniforms:{
+            uTime:{value:0},
+            uPixelRatio:{value:renderer.getPixelRatio()}
+        },
+        transparent:true,
+        depthWrite:false,
+        blending:THREE.AdditiveBlending
+    });
+
+    const p=new THREE.Points(g,m);
+    p.frustumCulled=false;
     scene.add(p);
-
-    const lines=[];
-    const radialCount=42;
-
-    for(let i=0;i<radialCount;i++){
-        const a=
-            i/radialCount*
-            Math.PI*2;
-
-        lines.push(
-            0,-18.19,0,
-            Math.cos(a)*36,
-            -18.19,
-            Math.sin(a)*36
-        );
-    }
-
-    const lg=
-        new THREE.BufferGeometry();
-
-    lg.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            lines,
-            3
-        )
-    );
-
-    const lm=
-        new THREE.LineBasicMaterial({
-            color:0xb16bd9,
-            transparent:true,
-            opacity:.055,
-            depthWrite:false,
-            blending:
-                THREE.AdditiveBlending
-        });
-
-    scene.add(
-        new THREE.LineSegments(
-            lg,
-            lm
-        )
-    );
+    return {points:p,material:m};
 }
+const fountain=createFountain();
 
-createFloor();
+const pointer={x:0,y:0,tx:0,ty:0};
 
-/* ============================
-   GROUND GLOW RINGS
-============================ */
+addEventListener("pointermove",e=>{
+    pointer.tx=(e.clientX/innerWidth-.5)*2;
+    pointer.ty=(e.clientY/innerHeight-.5)*2;
+},{passive:true});
 
-const groundRingGroup=
-    new THREE.Group();
+addEventListener("pointerleave",()=>{
+    pointer.tx=0;
+    pointer.ty=0;
+},{passive:true});
 
-groundRingGroup.position.set(
-    0,
-    -18.05,
-    0
-);
+addEventListener("resize",()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.fov=innerWidth<768?56:48;
+    camera.position.z=innerWidth<768?43:39;
+    camera.updateProjectionMatrix();
 
-scene.add(
-    groundRingGroup
-);
+    renderer.setPixelRatio(Math.min(devicePixelRatio||1,innerWidth<768?1.35:1.75));
+    renderer.setSize(innerWidth,innerHeight);
+    composer.setSize(innerWidth,innerHeight);
 
-for(let i=0;i<7;i++){
-    const r=
-        1.25+
-        i*.73;
-
-    const points=[];
-
-    for(let j=0;j<130;j++){
-        const a=
-            j/130*
-            Math.PI*2;
-
-        points.push(
-            new THREE.Vector3(
-                Math.cos(a)*r,
-                0,
-                Math.sin(a)*r
-            )
-        );
-    }
-
-    const g=
-        new THREE.BufferGeometry()
-        .setFromPoints(
-            points
-        );
-
-    const m=
-        new THREE.LineBasicMaterial({
-            color:
-                i<2
-                    ?0xffd7ef
-                    :0xe177cf,
-
-            transparent:true,
-            opacity:
-                .30-i*.03,
-
-            blending:
-                THREE.AdditiveBlending,
-
-            depthWrite:false
-        });
-
-    groundRingGroup.add(
-        new THREE.LineLoop(
-            g,
-            m
-        )
-    );
-}
-
-/* ============================
-   BACKGROUND STARS
-============================ */
-
-function createStars(){
-    const n=
-        CONFIG.starCount;
-
-    const p=
-        new Float32Array(
-            n*3
-        );
-
-    const c=
-        new Float32Array(
-            n*3
-        );
-
-    for(let i=0;i<n;i++){
-        p[i*3]=
-            (Math.random()-.5)*95;
-
-        p[i*3+1]=
-            (Math.random()-.5)*64;
-
-        p[i*3+2]=
-            -8-
-            Math.random()*55;
-
-        const b=
-            .45+
-            Math.random()*.55;
-
-        c[i*3]=b;
-        c[i*3+1]=b*.63;
-        c[i*3+2]=b*.93;
-    }
-
-    const g=
-        new THREE.BufferGeometry();
-
-    g.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-            p,
-            3
-        )
-    );
-
-    g.setAttribute(
-        "color",
-        new THREE.BufferAttribute(
-            c,
-            3
-        )
-    );
-
-    const m=
-        new THREE.PointsMaterial({
-            size:.085,
-            vertexColors:true,
-            transparent:true,
-            opacity:.52,
-            depthWrite:false,
-            blending:
-                THREE.AdditiveBlending
-        });
-
-    const stars=
-        new THREE.Points(
-            g,
-            m
-        );
-
-    scene.add(stars);
-
-    return stars;
-}
-
-const stars=createStars();
-
-/* ============================
-   RADIAL LIGHT STREAKS
-============================ */
-
-function createRays(){
-    const verts=[];
-
-    for(let i=0;i<CONFIG.rayCount;i++){
-        const a=
-            Math.random()*
-            Math.PI*2;
-
-        const start=
-            16+
-            Math.random()*8;
-
-        const length=
-            3+
-            Math.random()*13;
-
-        const flatten=
-            .78;
-
-        verts.push(
-            Math.cos(a)*start,
-            Math.sin(a)*start*flatten+2,
-            -4-Math.random()*8,
-
-            Math.cos(a)*(start+length),
-            Math.sin(a)*(start+length)*flatten+2,
-            -4-Math.random()*8
-        );
-    }
-
-    const g=
-        new THREE.BufferGeometry();
-
-    g.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            verts,
-            3
-        )
-    );
-
-    const m=
-        new THREE.LineBasicMaterial({
-            color:0xed78c8,
-            transparent:true,
-            opacity:.085,
-            blending:
-                THREE.AdditiveBlending,
-            depthWrite:false
-        });
-
-    const rays=
-        new THREE.LineSegments(
-            g,
-            m
-        );
-
-    scene.add(rays);
-
-    return rays;
-}
-
-const rays=createRays();
-
-/* ============================
-   MOUSE PARALLAX
-============================ */
-
-const pointer={
-    x:0,
-    y:0,
-    tx:0,
-    ty:0
-};
-
-window.addEventListener(
-    "pointermove",
-    e=>{
-        pointer.tx=
-            (
-                e.clientX/
-                innerWidth-
-                .5
-            )*2;
-
-        pointer.ty=
-            (
-                e.clientY/
-                innerHeight-
-                .5
-            )*2;
-    },
-    {passive:true}
-);
-
-window.addEventListener(
-    "pointerleave",
-    ()=>{
-        pointer.tx=0;
-        pointer.ty=0;
-    },
-    {passive:true}
-);
-
-/* ============================
-   RESIZE
-============================ */
-
-window.addEventListener(
-    "resize",
-    ()=>{
-        camera.aspect=
-            innerWidth/
-            innerHeight;
-
-        camera.fov=
-            innerWidth<768
-                ?58
-                :52;
-
-        camera.position.z=
-            innerWidth<768
-                ?54
-                :43;
-
-        camera.updateProjectionMatrix();
-
-        renderer.setSize(
-            innerWidth,
-            innerHeight
-        );
-
-        composer.setSize(
-            innerWidth,
-            innerHeight
-        );
-    }
-);
-
-/* ============================
-   ANIMATION
-============================ */
+    haloMat.uniforms.uPixelRatio.value=renderer.getPixelRatio();
+    bodyMat.uniforms.uPixelRatio.value=renderer.getPixelRatio();
+    fountain.material.uniforms.uPixelRatio.value=renderer.getPixelRatio();
+});
 
 function heartbeat(t){
-    const cycle=
-        t%1.45;
-
+    const cycle=t%1.55;
     let value=0;
 
-    if(cycle<.13){
-        value=
-            Math.sin(
-                cycle/.13*
-                Math.PI
-            );
-    }
-
-    if(
-        cycle>.18 &&
-        cycle<.31
-    ){
-        value+=
-            .48*
-            Math.sin(
-                (cycle-.18)/
-                .13*
-                Math.PI
-            );
-    }
+    if(cycle<.12)value=Math.sin(cycle/.12*Math.PI);
+    if(cycle>.19&&cycle<.31)value+=.52*Math.sin((cycle-.19)/.12*Math.PI);
 
     return value;
 }
 
-let first=true;
+const clock=new THREE.Clock();
+let firstFrame=true;
 
 function animate(){
-    requestAnimationFrame(
-        animate
-    );
+    requestAnimationFrame(animate);
 
-    const t=
-        clock.getElapsedTime();
+    const delta=Math.min(clock.getDelta(),.033);
+    const t=clock.elapsedTime;
 
-    const beat=
-        heartbeat(t);
+    velVar.material.uniforms.uTime.value=t;
+    velVar.material.uniforms.uDelta.value=delta;
 
-    mainHeart.material.uniforms
-        .uTime.value=t;
+    posVar.material.uniforms.uTime.value=t;
+    posVar.material.uniforms.uDelta.value=delta;
 
-    mainHeart.material.uniforms
-        .uBeat.value=beat;
+    gpu.compute();
 
-    auraHeart.material.uniforms
-        .uTime.value=t;
+    const currentPos=gpu.getCurrentRenderTarget(posVar).texture;
+    const currentVel=gpu.getCurrentRenderTarget(velVar).texture;
 
-    auraHeart.material.uniforms
-        .uBeat.value=beat;
+    haloMat.uniforms.texturePosition.value=currentPos;
+    haloMat.uniforms.textureVelocity.value=currentVel;
+    haloMat.uniforms.uTime.value=t;
 
-    streams.material.uniforms
-        .uTime.value=t;
+    bodyMat.uniforms.texturePosition.value=currentPos;
+    bodyMat.uniforms.textureVelocity.value=currentVel;
+    bodyMat.uniforms.uTime.value=t;
 
-    pointer.x+=
-        (pointer.tx-pointer.x)*
-        .025;
+    trailMat.uniforms.texturePosition.value=currentPos;
+    trailMat.uniforms.textureVelocity.value=currentVel;
 
-    pointer.y+=
-        (pointer.ty-pointer.y)*
-        .025;
+    fountain.material.uniforms.uTime.value=t;
 
-    heartGroup.rotation.y=
-        pointer.x*.075+
-        Math.sin(t*.16)*.018;
+    pointer.x+=(pointer.tx-pointer.x)*.025;
+    pointer.y+=(pointer.ty-pointer.y)*.025;
 
-    heartGroup.rotation.x=
-        pointer.y*.035;
+    const beat=heartbeat(t);
 
-    camera.position.x+=
-        (
-            pointer.x*.45-
-            camera.position.x
-        )*.025;
+    heartGroup.scale.setScalar(1+beat*.024+Math.sin(t*.65)*.004);
+    heartGroup.rotation.y=pointer.x*.055+Math.sin(t*.11)*.012;
+    heartGroup.rotation.x=pointer.y*.022;
 
-    camera.position.y+=
-        (
-            2-
-            pointer.y*.25-
-            camera.position.y
-        )*.025;
+    camera.position.x+=(pointer.x*.38-camera.position.x)*.025;
+    camera.position.y+=(3.6-pointer.y*.20-camera.position.y)*.025;
+    camera.lookAt(0,.25,0);
 
-    camera.lookAt(
-        0,
-        .4,
-        0
-    );
+    stars.rotation.z+=.000015;
+    rays.rotation.z=Math.sin(t*.07)*.005;
 
-    auraHeart.points.rotation.z=
-        Math.sin(t*.10)*.006;
-
-    streams.points.rotation.z=
-        Math.sin(t*.13)*.004;
-
-    groundRingGroup.scale.setScalar(
-        1+
-        beat*.025+
-        Math.sin(t*1.2)*.008
-    );
-
-    fountain.rotation.y=
-        t*.05;
-
-    stars.rotation.z=
-        t*.002;
-
-    rays.rotation.z=
-        Math.sin(t*.08)*.006;
+    ground.ringGroup.scale.setScalar(1+beat*.025+Math.sin(t*1.1)*.006);
+    fountain.points.rotation.y=t*.025;
 
     composer.render();
 
-    if(first){
-        first=false;
-
-        setTimeout(
-            ()=>{
-                document
-                    .getElementById(
-                        "loading"
-                    )
-                    .classList
-                    .add(
-                        "hide"
-                    );
-            },
-            450
-        );
+    if(firstFrame){
+        firstFrame=false;
+        setTimeout(()=>document.getElementById("loading").classList.add("hide"),500);
     }
 }
 
