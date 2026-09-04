@@ -8,2223 +8,351 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;overflow:hidden;background:#000}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
-.home{
-    position:fixed;
-    top:20px;
-    left:22px;
-    z-index:10;
-    color:rgba(255,235,245,.28);
-    text-decoration:none;
-    font:10px Arial,sans-serif;
-    letter-spacing:3px;
-    transition:.3s
-}
-.home:hover{
-    color:#fff5fa;
-    text-shadow:0 0 10px #ff8bc5
-}
+.home{position:fixed;left:22px;top:20px;z-index:10;color:rgba(255,235,245,.26);text-decoration:none;font:10px Arial,sans-serif;letter-spacing:3px;transition:.3s}
+.home:hover{color:#fff7fb;text-shadow:0 0 10px #ff8cc6}
 </style>
 </head>
-
 <body>
-
 <a class="home" href="/">HOME</a>
 <canvas id="c"></canvas>
-
 <script>
 (()=>{
 "use strict";
-
 const canvas=document.getElementById("c");
 const ctx=canvas.getContext("2d",{alpha:false});
-
 const TAU=Math.PI*2;
-const LOOP=14.6;
-
-let W=0;
-let H=0;
-let DPR=1;
-let scale=1;
-let cx=0;
-let cy=0;
-let floorY=0;
-
-let last=performance.now();
-let frameNo=0;
-let resizeTimer=null;
-
-let contour=[];
-let edge=[];
-let center=[];
-let floorDots=[];
-let stream=[];
-let rays=[];
-let stars=[];
-
-const CFG={
-    contourDesktop:2200,
-    contourMobile:1200,
-    centerDesktop:10000,
-    centerMobile:4600,
-
-    haloBaseDesktop:3000,
-    haloBaseMobile:1500,
-
-    haloExtraDesktop:4000,
-    haloExtraMobile:1900
-};
-
-function mobile(){
-    return W<720;
+let W=0,H=0,DPR=1,scale=1,cx=0,cy=0,floorY=0,last=performance.now(),resizeTimer=null;
+let contour=[],edge=[],fills=[],stars=[],floorDots=[],stream=[],notchStream=[];
+let glowWhite,glowPink,glowSoft;
+const mobile=()=>W<720;
+const rand=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const fract=v=>v-Math.floor(v);
+const gauss=()=>Math.random()+Math.random()+Math.random()+Math.random()-2;
+function smooth(v){v=clamp(v,0,1);return v*v*(3-2*v)}
+function hash01(i,f,s=0){let h=(Math.imul((i+1+s)|0,374761393)+Math.imul((f+1)|0,668265263))|0;h=h^(h>>>13);h=Math.imul(h,1274126177);return((h^(h>>>16))>>>0)/4294967296}
+function heart(t,s=1){const q=Math.sin(t);return{x:16*q*q*q*s,y:-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))*s}}
+function heartD(t,s=1){const si=Math.sin(t),co=Math.cos(t);return{x:48*si*si*co*s,y:(13*Math.sin(t)-10*Math.sin(2*t)-6*Math.sin(3*t)-4*Math.sin(4*t))*s}}
+function scatterInside(x,y,beta){const rx=-beta*Math.log(Math.max(1e-6,Math.random()));const ry=-beta*Math.log(Math.max(1e-6,Math.random()));return{x:x-rx*x,y:y-ry*y}}
+function sprite(size,c0,c1,c2){
+    const cv=document.createElement("canvas");
+    cv.width=cv.height=size;
+    const g=cv.getContext("2d");
+    const r=size/2;
+    const gr=g.createRadialGradient(r,r,0,r,r,r);
+    gr.addColorStop(0,c0);
+    gr.addColorStop(.08,c0);
+    gr.addColorStop(.24,c1);
+    gr.addColorStop(.56,c2);
+    gr.addColorStop(1,"rgba(255,120,200,0)");
+    g.fillStyle=gr;
+    g.fillRect(0,0,size,size);
+    return cv;
 }
-
-function rand(a,b){
-    return a+Math.random()*(b-a);
+function makeSprites(){
+    glowWhite=sprite(96,"rgba(255,255,255,1)","rgba(255,238,246,.95)","rgba(255,165,210,.14)");
+    glowPink=sprite(72,"rgba(255,245,250,.92)","rgba(255,165,210,.74)","rgba(255,105,185,.12)");
+    glowSoft=sprite(160,"rgba(255,200,228,.18)","rgba(255,140,198,.08)","rgba(255,110,180,.03)");
 }
-
-function clamp(v,a,b){
-    return Math.max(a,Math.min(b,v));
-}
-
-function fract(v){
-    return v-Math.floor(v);
-}
-
-function smooth(v){
-    v=clamp(v,0,1);
-    return v*v*(3-2*v);
-}
-
-function easeInOut(v){
-    v=clamp(v,0,1);
-
-    return v<.5
-        ?4*v*v*v
-        :1-Math.pow(-2*v+2,3)/2;
-}
-
-function gauss(){
-    return (
-        Math.random()+
-        Math.random()+
-        Math.random()+
-        Math.random()-
-        2
-    );
-}
-
-/*
- * 快速伪随机：
- * 用于每帧 ±1px 抖动。
- */
-function hash01(i,f,s=0){
-
-    let h=
-        (
-            Math.imul(
-                (i+1+s)|0,
-                374761393
-            )+
-            Math.imul(
-                (f+1)|0,
-                668265263
-            )
-        )|0;
-
-    h=h^(h>>>13);
-
-    h=Math.imul(
-        h,
-        1274126177
-    );
-
-    return (
-        (
-            h^(h>>>16)
-        )>>>0
-    )/4294967296;
-}
-
-/* =========================================================
-   经典爱心函数
-========================================================= */
-
-function heart(t,s=1){
-
-    const q=Math.sin(t);
-
-    return {
-        x:
-            16*
-            q*q*q*
-            s,
-
-        y:
-            -(
-                13*Math.cos(t)
-                -5*Math.cos(2*t)
-                -2*Math.cos(3*t)
-                -Math.cos(4*t)
-            )*
-            s
-    };
-}
-
-/*
- * 对应 Python:
- *
- * ratio_x = -beta * log(random())
- * ratio_y = -beta * log(random())
- *
- * 这是目标视频里很关键的内部扩散。
- */
-function scatterInside(x,y,beta){
-
-    const rx=
-        -beta*
-        Math.log(
-            Math.max(
-                1e-6,
-                Math.random()
-            )
-        );
-
-    const ry=
-        -beta*
-        Math.log(
-            Math.max(
-                1e-6,
-                Math.random()
-            )
-        );
-
-    return {
-        x:x-rx*x,
-        y:y-ry*y
-    };
-}
-
-/*
- * 预计算：
- *
- * force =
- * 1 / ((x*x + y*y) ** 0.420)
- *
- * 后面每帧只需要：
- *
- * x - ratio * fx
- */
-function makePoint(
-    x,
-    y,
-    z,
-    size,
-    seed
-){
-
-    const r2=
-        Math.max(
-            16,
-            x*x+y*y
-        );
-
-    const force=
-        1/
-        Math.pow(
-            r2,
-            .420
-        );
-
-    return {
-        x,
-        y,
-        z,
-
-        fx:force*x,
-        fy:force*y,
-
-        size,
-        seed
-    };
-}
-
-/* =========================================================
-   构建爱心
-========================================================= */
-
 function buildHeart(){
-
-    contour=[];
-    edge=[];
-    center=[];
-
-    const n=
-        mobile()
-        ?CFG.contourMobile
-        :CFG.contourDesktop;
-
-    const centerN=
-        mobile()
-        ?CFG.centerMobile
-        :CFG.centerDesktop;
-
-    /*
-     * 第一层：2000 左右原始轮廓点
-     */
-    for(let i=0;i<n;i++){
-
-        const t=
-            Math.random()*
-            TAU;
-
-        const p=
-            heart(
-                t,
-                scale
-            );
-
-        const q=
-            Math.random();
-
-        const size=
-            q<.72
-            ?1
-            :q<.93
-            ?1.5
-            :2;
-
-        contour.push(
-            makePoint(
-                p.x,
-                p.y,
-                gauss()*
-                scale*.11,
-                size,
-                Math.random()
-            )
-        );
-    }
-
-    /*
-     * 第二层：
-     * 每个轮廓点再扩散 3 次
-     *
-     * beta = 0.05
-     */
-    for(const p of contour){
-
-        for(let k=0;k<3;k++){
-
-            const q=
-                scatterInside(
-                    p.x,
-                    p.y,
-                    .05
-                );
-
-            edge.push(
-                makePoint(
-                    q.x,
-                    q.y,
-
-                    gauss()*
-                    scale*.16,
-
-                    Math.random()<.82
-                    ?1
-                    :1.5,
-
-                    Math.random()
-                )
-            );
+    contour=[];edge=[];fills=[];
+    const contourN=mobile()?1700:2900;
+    const fillN=mobile()?5600:11800;
+    for(let i=0;i<contourN;i++){
+        const t=Math.random()*TAU;
+        contour.push({
+            t,dir:Math.random()<.5?-1:1,seed:Math.random(),band:gauss()*.11,rad:0.985+Math.random()*.035,
+            size:Math.random()<.82?1:Math.random()<.97?1.4:2.0,alpha:rand(.72,.96),hot:Math.random()<.06
+        });
+        for(let k=0;k<2;k++){
+            const p=heart(t,scale);
+            const q=scatterInside(p.x,p.y,.052+Math.random()*.04);
+            edge.push({
+                x:q.x,y:q.y,seed:Math.random(),size:Math.random()<.84?1:1.4,alpha:rand(.26,.52),hot:Math.random()<.018
+            });
         }
     }
-
-    /*
-     * 第三层：
-     * 10000 个中心扩散粒子
-     *
-     * beta = 0.27
-     *
-     * 这是目标视频中心不空、
-     * 又呈现星尘状态的重要原因。
-     */
-    for(let i=0;i<centerN;i++){
-
-        const p=
-            contour[
-                (
-                    Math.random()*
-                    contour.length
-                )|0
-            ];
-
-        const q=
-            scatterInside(
-                p.x,
-                p.y,
-                .27
-            );
-
-        center.push(
-            makePoint(
-                q.x,
-                q.y,
-
-                gauss()*
-                scale*.21,
-
-                Math.random()<.93
-                ?1
-                :1.5,
-
-                Math.random()
-            )
-        );
+    for(let i=0;i<fillN;i++){
+        const t=Math.random()*TAU;
+        const p=heart(t,scale);
+        const q1=scatterInside(p.x,p.y,.25+Math.random()*.06);
+        const q2=scatterInside(q1.x,q1.y,.07*Math.random());
+        fills.push({
+            x:q2.x+gauss()*scale*.05,
+            y:q2.y+gauss()*scale*.05,
+            seed:Math.random(),
+            size:Math.random()<.92?1:1.4,
+            alpha:rand(.05,.16),
+            hot:Math.random()<.009
+        });
     }
 }
-
-/* =========================================================
-   其他粒子
-========================================================= */
-
 function buildDecor(){
-
-    floorDots=[];
-    stream=[];
-    rays=[];
-    stars=[];
-
-    /*
-     * 地面粒子
-     */
-    const floorN=
-        mobile()
-        ?700
-        :1600;
-
-    for(let i=0;i<floorN;i++){
-
-        floorDots.push({
-            r:
-                Math.sqrt(
-                    Math.random()
-                ),
-
-            a:
-                Math.random()*
-                TAU,
-
-            s:
-                rand(
-                    .45,
-                    1.1
-                ),
-
-            alpha:
-                rand(
-                    .08,
-                    .38
-                )
-        });
-    }
-
-    /*
-     * 心尖 -> 地面
-     */
-    const streamN=
-        mobile()
-        ?120
-        :260;
-
-    for(let i=0;i<streamN;i++){
-
-        stream.push({
-            q:
-                Math.random(),
-
-            phase:
-                rand(
-                    0,
-                    TAU
-                ),
-
-            speed:
-                rand(
-                    .07,
-                    .15
-                ),
-
-            s:
-                Math.random()<.9
-                ?rand(.7,1.3)
-                :rand(1.8,3.2),
-
-            alpha:
-                rand(
-                    .25,
-                    .9
-                )
-        });
-    }
-
-    /*
-     * 最终爆发射线
-     */
-    const rayN=
-        mobile()
-        ?110
-        :230;
-
-    for(let i=0;i<rayN;i++){
-
-        rays.push({
-            u:
-                Math.random(),
-
-            delay:
-                rand(
-                    0,
-                    .45
-                ),
-
-            len:
-                rand(
-                    75,
-                    Math.max(
-                        130,
-                        Math.min(W,H)*
-                        .38
-                    )
-                ),
-
-            side:
-                rand(
-                    -.28,
-                    .28
-                ),
-
-            width:
-                rand(
-                    .45,
-                    1.4
-                ),
-
-            alpha:
-                rand(
-                    .15,
-                    .75
-                ),
-
-            spark:
-                Math.random()<.28
-        });
-    }
-
-    /*
-     * 背景星尘
-     */
-    const starN=
-        mobile()
-        ?450
-        :1100;
-
-    for(let i=0;i<starN;i++){
-
-        stars.push({
-            x:
-                Math.random(),
-
-            y:
-                Math.random(),
-
-            size:
-                Math.random()<.97
-                ?rand(.35,.9)
-                :rand(1.3,2.6),
-
-            alpha:
-                rand(
-                    .025,
-                    .18
-                ),
-
-            phase:
-                rand(
-                    0,
-                    TAU
-                )
-        });
-    }
+    stars=[];floorDots=[];stream=[];notchStream=[];
+    const starN=mobile()?380:900;
+    const floorN=mobile()?650:1500;
+    const streamN=mobile()?120:260;
+    const notchN=mobile()?70:180;
+    for(let i=0;i<starN;i++)stars.push({x:Math.random(),y:Math.random(),size:Math.random()<.97?rand(.35,.95):rand(1.2,2.4),alpha:rand(.02,.15),phase:rand(0,TAU)});
+    for(let i=0;i<floorN;i++)floorDots.push({r:Math.sqrt(Math.random()),a:Math.random()*TAU,s:rand(.4,1),alpha:rand(.06,.24)});
+    for(let i=0;i<streamN;i++)stream.push({q:Math.random(),phase:rand(0,TAU),speed:rand(.06,.14),s:Math.random()<.9?rand(.65,1.25):rand(1.8,3),alpha:rand(.22,.8)});
+    for(let i=0;i<notchN;i++)notchStream.push({q:Math.random(),phase:rand(0,TAU),speed:rand(.08,.16),s:Math.random()<.9?rand(.6,1.15):rand(1.6,2.8),alpha:rand(.18,.65)});
 }
-
-/* =========================================================
-   Resize
-========================================================= */
-
 function resize(){
-
-    W=innerWidth;
-    H=innerHeight;
-
-    DPR=
-        Math.min(
-            devicePixelRatio||1,
-            1.6
-        );
-
-    canvas.width=
-        Math.round(
-            W*DPR
-        );
-
-    canvas.height=
-        Math.round(
-            H*DPR
-        );
-
-    canvas.style.width=
-        W+"px";
-
-    canvas.style.height=
-        H+"px";
-
-    ctx.setTransform(
-        DPR,
-        0,
-        0,
-        DPR,
-        0,
-        0
-    );
-
-    /*
-     * 不开启抗锯齿式图片平滑。
-     * 目标本身就是一颗颗清晰小粒子。
-     */
-    ctx.imageSmoothingEnabled=false;
-
-    scale=
-        Math.min(
-            W*.52/32,
-            H*.60/29
-        );
-
+    W=innerWidth;H=innerHeight;
+    DPR=Math.min(devicePixelRatio||1,1.6);
+    canvas.width=Math.round(W*DPR);
+    canvas.height=Math.round(H*DPR);
+    canvas.style.width=W+"px";
+    canvas.style.height=H+"px";
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.imageSmoothingEnabled=true;
+    scale=Math.min(W*.50/32,H*.64/29);
     cx=W*.5;
-    cy=H*.335;
-
-    floorY=
-        Math.min(
-            H*.80,
-            cy+
-            scale*18.8
-        );
-
+    cy=H*.34;
+    floorY=Math.min(H*.82,cy+scale*18.2);
     buildHeart();
     buildDecor();
-
-    ctx.fillStyle="#000";
-    ctx.fillRect(
-        0,
-        0,
-        W,
-        H
-    );
 }
-
-/* =========================================================
-   李峋版本的心跳
-========================================================= */
-
-function beatCurve(t){
-
-    /*
-     * 对应：
-     *
-     * curve(p)
-     * ratio = 15 * curve(...)
-     */
-
-    return (
-        2/
-        Math.PI
-    )*
-    Math.sin(
-        TAU*
-        t/
-        .92
-    );
-}
-
-/* =========================================================
-   动态阶段
-========================================================= */
-
-function rotYForPhase(ph){
-
-    /*
-     * 0 - 7.75
-     * 正面
-     */
-
-    if(ph<7.75){
-
-        return (
-            .025*
-            Math.sin(
-                ph*.6
-            )
-        );
-    }
-
-    /*
-     * 7.75 - 10.65
-     * 正面 -> 侧面
-     */
-    if(ph<10.65){
-
-        const q=
-            easeInOut(
-                (
-                    ph-
-                    7.75
-                )/
-                2.9
-            );
-
-        /*
-         * 中途增加轻微过冲，
-         * 避免机械线性旋转。
-         */
-        return (
-            1.47*q+
-            .065*
-            Math.sin(
-                q*
-                Math.PI*2
-            )*
-            Math.sin(
-                q*
-                Math.PI
-            )
-        );
-    }
-
-    /*
-     * 短暂保持侧面
-     */
-    if(ph<10.95){
-        return 1.47;
-    }
-
-    /*
-     * 重新回到正面
-     */
-    if(ph<12.55){
-
-        const q=
-            easeInOut(
-                (
-                    ph-
-                    10.95
-                )/
-                1.60
-            );
-
-        return (
-            1.47*
-            (1-q)
-            -
-            .06*
-            Math.sin(
-                q*
-                Math.PI
-            )*
-            q
-        );
-    }
-
-    return (
-        .015*
-        Math.sin(
-            ph*.9
-        )
-    );
-}
-
-function ringVis(ph){
-
-    return (
-        smooth(
-            (
-                ph-
-                7.45
-            )/
-            .65
-        )
-        *
-        (
-            1-
-            smooth(
-                (
-                    ph-
-                    12.15
-                )/
-                .65
-            )
-        )
-    );
-}
-
-function burstVis(ph){
-
-    return (
-        smooth(
-            (
-                ph-
-                12.25
-            )/
-            .30
-        )
-        *
-        (
-            1-
-            smooth(
-                (
-                    ph-
-                    14.05
-                )/
-                .45
-            )
-        )
-    );
-}
-
-/* =========================================================
-   粒子三维旋转
-========================================================= */
-
-function transform(
-    p,
-    ratio,
-    rot,
-    idx,
-    kind,
-    t
-){
-
-    /*
-     * 和 Python random.randint(-1,1)
-     * 对应的每帧随机抖动。
-     */
-    const jx=
-        (
-            hash01(
-                idx,
-                frameNo,
-                kind*23
-            )-
-            .5
-        )*
-        2;
-
-    const jy=
-        (
-            hash01(
-                idx,
-                frameNo,
-                kind*47
-            )-
-            .5
-        )*
-        2;
-
-    let x=
-        p.x-
-        ratio*
-        p.fx+
-        jx;
-
-    let y=
-        p.y-
-        ratio*
-        p.fy+
-        jy;
-
-    let z=
-        p.z+
-        Math.sin(
-            t*.9+
-            p.seed*31
-        )*
-        scale*.018;
-
-    const c=
-        Math.cos(rot);
-
-    const s=
-        Math.sin(rot);
-
-    /*
-     * Y 轴三维旋转
-     */
-    const xr=
-        x*c+
-        z*s;
-
-    const zr=
-        -x*s+
-        z*c;
-
-    return {
-        x:
-            cx+
-            xr,
-
-        y:
-            cy+
-            y+
-            zr*.035,
-
-        z:zr
-    };
-}
-
-/* =========================================================
-   三类主体粒子
-========================================================= */
-
-function drawCloud(
-    arr,
-    ratio,
-    rot,
-    t,
-    kind,
-    color,
-    alpha
-){
-
-    ctx.fillStyle=color;
-    ctx.globalAlpha=alpha;
-
-    for(
-        let i=0;
-        i<arr.length;
-        i++
-    ){
-
-        const p=arr[i];
-
-        const q=
-            transform(
-                p,
-                ratio,
-                rot,
-                i,
-                kind,
-                t
-            );
-
-        const s=p.size;
-
-        ctx.fillRect(
-            q.x-
-            s*.5,
-
-            q.y-
-            s*.5,
-
-            s,
-            s
-        );
-    }
-}
-
-/* =========================================================
-   动态 halo
-========================================================= */
-
-function drawHalo(
-    curve,
-    rot,
-    t
-){
-
-    const base=
-        mobile()
-        ?CFG.haloBaseMobile
-        :CFG.haloBaseDesktop;
-
-    const extra=
-        mobile()
-        ?CFG.haloExtraMobile
-        :CFG.haloExtraDesktop;
-
-    /*
-     * 视频代码：
-     *
-     * halo_number =
-     * 3000 +
-     * 4000 * abs(curve ** 2)
-     */
-    const n=
-        Math.floor(
-            base+
-            extra*
-            Math.abs(
-                curve*
-                curve
-            )
-        );
-
-    /*
-     * 视频代码：
-     *
-     * halo_radius =
-     * 4 + 6 * (1 + curve)
-     */
-    const haloRadius=
-        4+
-        6*
-        (
-            1+
-            curve
-        );
-
-    const haloScale=
-        scale*
-        1.055;
-
-    const jitter=
-        14*
-        (
-            scale/
-            11
-        );
-
-    ctx.globalAlpha=.50;
-    ctx.fillStyle=
-        "rgb(255,148,204)";
-
-    /*
-     * 关键：
-     *
-     * halo 每一帧重新随机生成，
-     * 所以不会像以前一样是一圈固定粒子。
-     */
-    for(let i=0;i<n;i++){
-
-        const tt=
-            Math.random()*
-            TAU;
-
-        const p=
-            heart(
-                tt,
-                haloScale
-            );
-
-        const r2=
-            Math.max(
-                16,
-                p.x*p.x+
-                p.y*p.y
-            );
-
-        /*
-         * 对应 shrink():
-         *
-         * force = -1 / r^1.2
-         */
-        const force=
-            -1/
-            Math.pow(
-                r2,
-                .60
-            );
-
-        let x=
-            p.x-
-            haloRadius*
-            force*
-            p.x;
-
-        let y=
-            p.y-
-            haloRadius*
-            force*
-            p.y;
-
-        /*
-         * ±14 随机扩散
-         */
-        x+=
-            rand(
-                -jitter,
-                jitter
-            );
-
-        y+=
-            rand(
-                -jitter,
-                jitter
-            );
-
-        let z=
-            gauss()*
-            scale*.20;
-
-        /*
-         * 和主体一起转向侧面
-         */
-        const c=
-            Math.cos(rot);
-
-        const s=
-            Math.sin(rot);
-
-        const xr=
-            x*c+
-            z*s;
-
-        const zr=
-            -x*s+
-            z*c;
-
-        const sx=
-            cx+xr;
-
-        const sy=
-            cy+y+
-            zr*.035;
-
-        const size=
-            Math.random()<.55
-            ?1
-            :Math.random()<.92
-            ?1.5
-            :2;
-
-        /*
-         * 极少数亮白粒子
-         */
-        if(Math.random()<.055){
-
-            ctx.globalAlpha=.85;
-
-            ctx.fillStyle=
-                "rgb(255,238,247)";
-
-            ctx.fillRect(
-                sx-size*.5,
-                sy-size*.5,
-                size+1,
-                size+1
-            );
-
-            ctx.globalAlpha=.50;
-
-            ctx.fillStyle=
-                "rgb(255,148,204)";
-
-        }else{
-
-            ctx.fillRect(
-                sx-size*.5,
-                sy-size*.5,
-                size,
-                size
-            );
-        }
-    }
-}
-
-/* =========================================================
-   三层旋转光环
-========================================================= */
-
-function drawOrbitRing(
-    yoff,
-    rx,
-    ry,
-    head,
-    alpha
-){
-
-    const steps=220;
-
-    ctx.lineWidth=.65;
-
-    for(
-        let j=0;
-        j<steps;
-        j++
-    ){
-
-        const a=
-            j/
-            steps*
-            TAU;
-
-        const b=
-            (
-                j+1
-            )/
-            steps*
-            TAU;
-
-        const mid=
-            (
-                a+b
-            )*.5;
-
-        const dist=
-            Math.atan2(
-                Math.sin(
-                    mid-
-                    head
-                ),
-                Math.cos(
-                    mid-
-                    head
-                )
-            );
-
-        /*
-         * 光环上有一个高速亮头，
-         * 不是整圈固定亮度。
-         */
-        const hot=
-            Math.exp(
-                -dist*
-                dist/
-                .20
-            );
-
-        ctx.globalAlpha=
-            alpha*
-            (
-                .16+
-                .84*
-                hot
-            );
-
-        ctx.strokeStyle=
-            hot>.45
-            ?"rgb(255,244,249)"
-            :"rgb(255,130,199)";
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx+
-            Math.cos(a)*
-            rx,
-
-            cy+
-            yoff+
-            Math.sin(a)*
-            ry
-        );
-
-        ctx.lineTo(
-            cx+
-            Math.cos(b)*
-            rx,
-
-            cy+
-            yoff+
-            Math.sin(b)*
-            ry
-        );
-
-        ctx.stroke();
-    }
-
-    /*
-     * 高亮粒子头
-     */
-    const hx=
-        cx+
-        Math.cos(head)*
-        rx;
-
-    const hy=
-        cy+
-        yoff+
-        Math.sin(head)*
-        ry;
-
-    ctx.globalAlpha=
-        alpha*.9;
-
-    ctx.fillStyle="#fff1f8";
-
-    ctx.fillRect(
-        hx-1.2,
-        hy-1.2,
-        2.4,
-        2.4
-    );
-}
-
-function drawOrbits(t,ph){
-
-    const a=
-        ringVis(ph);
-
-    if(a<=.001)
-        return;
-
-    drawOrbitRing(
-        -scale*5.0,
-        scale*10.5,
-        scale*1.65,
-        t*1.65,
-        a*.92
-    );
-
-    drawOrbitRing(
-        -scale*.45,
-        scale*11.8,
-        scale*1.95,
-        -t*1.25+2,
-        a
-    );
-
-    drawOrbitRing(
-        scale*4.55,
-        scale*10.7,
-        scale*1.72,
-        t*1.48+3.2,
-        a*.88
-    );
-}
-
-/* =========================================================
-   地面花瓣阵列
-========================================================= */
-
-function drawFloor(t){
-
-    ctx.save();
-
-    ctx.globalCompositeOperation=
-        "lighter";
-
-    const maxR=
-        Math.min(
-            W*.35,
-            scale*18.5
-        );
-
-    /*
-     * 透视压缩
-     */
-    const yScale=.23;
-
-    /*
-     * 放射线
-     */
-    const spokes=
-        mobile()
-        ?42
-        :66;
-
-    for(
-        let i=0;
-        i<spokes;
-        i++
-    ){
-
-        const a=
-            i/
-            spokes*
-            TAU+
-            t*.018;
-
-        const x2=
-            cx+
-            Math.cos(a)*
-            maxR;
-
-        const y2=
-            floorY+
-            Math.sin(a)*
-            maxR*
-            yScale;
-
-        const g=
-            ctx.createLinearGradient(
-                cx,
-                floorY,
-                x2,
-                y2
-            );
-
-        g.addColorStop(
-            0,
-            "rgba(255,246,251,.45)"
-        );
-
-        g.addColorStop(
-            .26,
-            "rgba(255,175,218,.20)"
-        );
-
-        g.addColorStop(
-            1,
-            "rgba(255,110,190,0)"
-        );
-
-        ctx.globalAlpha=.5;
-        ctx.strokeStyle=g;
-        ctx.lineWidth=.45;
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx,
-            floorY
-        );
-
-        ctx.lineTo(
-            x2,
-            y2
-        );
-
-        ctx.stroke();
-    }
-
-    /*
-     * 花瓣状同心环
-     */
-    const rings=
-        mobile()
-        ?20
-        :30;
-
-    for(
-        let r=1;
-        r<=rings;
-        r++
-    ){
-
-        const q=
-            r/rings;
-
-        const base=
-            maxR*
-            Math.pow(
-                q,
-                1.38
-            );
-
-        ctx.beginPath();
-
-        for(
-            let j=0;
-            j<=180;
-            j++
-        ){
-
-            const a=
-                j/
-                180*
-                TAU;
-
-            /*
-             * 两个频率叠加，
-             * 避免纯规则椭圆。
-             */
-            const wave=
-                1+
-                (
-                    .145*
-                    (1-q)+
-                    .018
-                )*
-                Math.sin(
-                    a*12-
-                    t*.65+
-                    r*.46
-                )
-                +
-                .012*
-                Math.sin(
-                    a*27+
-                    t*.2+
-                    r
-                );
-
-            const rr=
-                base*
-                wave;
-
-            const x=
-                cx+
-                Math.cos(a)*
-                rr;
-
-            const y=
-                floorY+
-                Math.sin(a)*
-                rr*
-                yScale;
-
-            if(j===0){
-
-                ctx.moveTo(
-                    x,
-                    y
-                );
-
-            }else{
-
-                ctx.lineTo(
-                    x,
-                    y
-                );
-            }
-        }
-
-        ctx.globalAlpha=
-            .12+
-            .32*
-            (1-q);
-
-        ctx.strokeStyle=
-            r<6
-            ?"rgb(255,240,248)"
-            :"rgb(255,163,210)";
-
-        ctx.lineWidth=
-            r<6
-            ?.9
-            :.55;
-
-        ctx.stroke();
-    }
-
-    /*
-     * 地面微粒
-     */
-    ctx.fillStyle=
-        "#ffd7eb";
-
-    for(const d of floorDots){
-
-        const rr=
-            d.r*
-            maxR;
-
-        const a=
-            d.a+
-            t*
-            .012*
-            (
-                1-
-                d.r
-            );
-
-        const x=
-            cx+
-            Math.cos(a)*
-            rr;
-
-        const y=
-            floorY+
-            Math.sin(a)*
-            rr*
-            yScale;
-
-        ctx.globalAlpha=
-            d.alpha*
-            (
-                1-
-                d.r*.6
-            );
-
-        ctx.fillRect(
-            x,
-            y,
-            d.s,
-            d.s
-        );
-    }
-
-    /*
-     * 中心波纹
-     */
-    for(let i=0;i<7;i++){
-
-        const k=
-            1+
-            Math.sin(
-                t*1.35-
-                i*.55
-            )*
-            .035;
-
-        const rx=
-            (
-                10+
-                i*11
-            )*
-            k;
-
-        const ry=
-            (
-                2.2+
-                i*2.25
-            )*
-            k;
-
-        ctx.globalAlpha=
-            .46-
-            i*.045;
-
-        ctx.strokeStyle=
-            i<2
-            ?"#fff7fb"
-            :"#ffb0d7";
-
-        ctx.lineWidth=
-            i<2
-            ?1.05
-            :.7;
-
-        ctx.beginPath();
-
-        ctx.ellipse(
-            cx,
-            floorY,
-            rx,
-            ry,
-            0,
-            0,
-            TAU
-        );
-
-        ctx.stroke();
-    }
-
-    ctx.restore();
-}
-
-/* =========================================================
-   心尖粒子流
-========================================================= */
-
-function drawStream(
-    t,
-    ratio,
-    rot
-){
-
-    const p=
-        heart(
-            Math.PI,
-            scale
-        );
-
-    const r2=
-        Math.max(
-            16,
-            p.x*p.x+
-            p.y*p.y
-        );
-
-    const force=
-        1/
-        Math.pow(
-            r2,
-            .420
-        );
-
-    const x=
-        p.x-
-        ratio*
-        force*
-        p.x;
-
-    const y=
-        p.y-
-        ratio*
-        force*
-        p.y;
-
-    const c=
-        Math.cos(rot);
-
-    const tipX=
-        cx+
-        x*c;
-
-    const tipY=
-        cy+
-        y;
-
-    ctx.save();
-
-    ctx.globalCompositeOperation=
-        "lighter";
-
-    for(const d of stream){
-
-        const q=
-            fract(
-                d.q+
-                t*
-                d.speed
-            );
-
-        const middle=
-            Math.sin(
-                q*
-                Math.PI
-            );
-
-        const yy=
-            tipY+
-            (
-                floorY-
-                tipY
-            )*
-            q;
-
-        const xx=
-            tipX+
-            Math.sin(
-                d.phase+
-                t*2+
-                q*13
-            )*
-            scale*
-            .12*
-            middle;
-
-        ctx.globalAlpha=
-            d.alpha*
-            middle;
-
-        ctx.fillStyle=
-            d.s>1.6
-            ?"#fff5fa"
-            :"#ffc2df";
-
-        ctx.fillRect(
-            xx-
-            d.s*.5,
-
-            yy-
-            d.s*.5,
-
-            d.s,
-            d.s
-        );
-    }
-
-    ctx.restore();
-}
-
-/* =========================================================
-   最终爆发
-========================================================= */
-
-function drawBurst(
-    ph,
-    ratio
-){
-
-    const visibility=
-        burstVis(ph);
-
-    if(visibility<=.001)
-        return;
-
-    ctx.save();
-
-    ctx.globalCompositeOperation=
-        "lighter";
-
-    const local=
-        ph-
-        12.25;
-
-    for(
-        let i=0;
-        i<rays.length;
-        i++
-    ){
-
-        const r=
-            rays[i];
-
-        /*
-         * 每条射线错峰出现
-         */
-        const q=
-            clamp(
-                (
-                    local-
-                    r.delay
-                )/
-                .72,
-                0,
-                1
-            );
-
-        if(q<=0)
-            continue;
-
-        const base=
-            heart(
-                r.u*
-                TAU,
-                scale
-            );
-
-        const r2=
-            Math.max(
-                16,
-                base.x*base.x+
-                base.y*base.y
-            );
-
-        const force=
-            1/
-            Math.pow(
-                r2,
-                .420
-            );
-
-        const ox=
-            base.x-
-            ratio*
-            force*
-            base.x;
-
-        const oy=
-            base.y-
-            ratio*
-            force*
-            base.y;
-
-        const l=
-            Math.hypot(
-                ox,
-                oy
-            )||1;
-
-        let nx=
-            ox/l;
-
-        let ny=
-            oy/l;
-
-        const tx=-ny;
-        const ty=nx;
-
-        /*
-         * 加少量切向偏移，
-         * 避免所有线完全指向中心。
-         */
-        let dx=
-            nx+
-            tx*
-            r.side;
-
-        let dy=
-            ny+
-            ty*
-            r.side;
-
-        const dl=
-            Math.hypot(
-                dx,
-                dy
-            )||1;
-
-        dx/=dl;
-        dy/=dl;
-
-        const len=
-            r.len*
-            (
-                .35+
-                .65*
-                smooth(q)
-            );
-
-        const sx=
-            cx+
-            ox+
-            dx*
-            rand(0,4);
-
-        const sy=
-            cy+
-            oy+
-            dy*
-            rand(0,4);
-
-        const ex=
-            sx+
-            dx*
-            len;
-
-        const ey=
-            sy+
-            dy*
-            len;
-
-        const fade=
-            visibility*
-            (
-                1-
-                .38*q
-            )*
-            r.alpha;
-
-        const g=
-            ctx.createLinearGradient(
-                sx,
-                sy,
-                ex,
-                ey
-            );
-
-        g.addColorStop(
-            0,
-            "rgba(255,249,252,.96)"
-        );
-
-        g.addColorStop(
-            .20,
-            "rgba(255,189,224,.72)"
-        );
-
-        g.addColorStop(
-            1,
-            "rgba(255,112,195,0)"
-        );
-
-        ctx.globalAlpha=fade;
-        ctx.strokeStyle=g;
-        ctx.lineWidth=r.width;
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            sx,
-            sy
-        );
-
-        ctx.lineTo(
-            ex,
-            ey
-        );
-
-        ctx.stroke();
-
-        /*
-         * 部分射线末端带亮粒子
-         */
-        if(
-            r.spark&&
-            q>.25
-        ){
-
-            ctx.globalAlpha=
-                fade*.8;
-
-            ctx.fillStyle="#fff8fc";
-
-            ctx.fillRect(
-                ex-1,
-                ey-1,
-                2,
-                2
-            );
-        }
-    }
-
-    ctx.restore();
-}
-
-/* =========================================================
-   背景
-========================================================= */
-
 function drawBackground(t){
-
-    ctx.globalCompositeOperation=
-        "source-over";
-
+    ctx.globalCompositeOperation="source-over";
     ctx.globalAlpha=1;
-
     ctx.fillStyle="#000";
-
-    ctx.fillRect(
-        0,
-        0,
-        W,
-        H
-    );
-
-    /*
-     * 非常弱的粉色环境光。
-     * 不再使用大面积紫色雾。
-     */
-    const g=
-        ctx.createRadialGradient(
-            cx,
-            cy,
-            0,
-
-            cx,
-            cy,
-
-            Math.max(
-                W,
-                H
-            )*.48
-        );
-
-    g.addColorStop(
-        0,
-        "rgba(92,20,64,.11)"
-    );
-
-    g.addColorStop(
-        .36,
-        "rgba(42,8,34,.045)"
-    );
-
-    g.addColorStop(
-        1,
-        "rgba(0,0,0,0)"
-    );
-
+    ctx.fillRect(0,0,W,H);
+    const g=ctx.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*.45);
+    g.addColorStop(0,"rgba(95,12,53,.10)");
+    g.addColorStop(.34,"rgba(48,7,27,.04)");
+    g.addColorStop(1,"rgba(0,0,0,0)");
     ctx.fillStyle=g;
-
-    ctx.fillRect(
-        0,
-        0,
-        W,
-        H
-    );
-
-    /*
-     * 背景星尘
-     */
-    ctx.globalCompositeOperation=
-        "lighter";
-
-    ctx.fillStyle=
-        "#ffafd4";
-
+    ctx.fillRect(0,0,W,H);
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#ffbad8";
     for(const s of stars){
-
-        ctx.globalAlpha=
-            s.alpha*
-            (
-                .55+
-                .45*
-                Math.sin(
-                    t*.7+
-                    s.phase
-                )
-            );
-
-        const x=
-            s.x*
-            W;
-
-        const y=
-            s.y*
-            H;
-
-        ctx.fillRect(
-            x,
-            y,
-            s.size,
-            s.size
-        );
+        ctx.globalAlpha=s.alpha*(.55+.45*Math.sin(t*.6+s.phase));
+        ctx.fillRect(s.x*W,s.y*H,s.size,s.size);
     }
-
     ctx.globalAlpha=1;
 }
-
-/* =========================================================
-   Main
-========================================================= */
-
-function animate(now){
-
-    requestAnimationFrame(
-        animate
-    );
-
-    const dt=
-        Math.min(
-            (
-                now-
-                last
-            )/
-            1000,
-            .033
-        );
-
-    last=now;
-
-    const t=
-        now*
-        .001;
-
-    frameNo=
-        (
-            frameNo+
-            1
-        )|0;
-
-    const ph=
-        t%
-        LOOP;
-
-    const curve=
-        beatCurve(t);
-
-    /*
-     * 视频代码核心参数：
-     *
-     * ratio = 15 * curve(...)
-     */
-    const ratio=
-        15*
-        curve;
-
-    const rot=
-        rotYForPhase(
-            ph
-        );
-
-    drawBackground(t);
-
-    /*
-     * 地面在后
-     */
-    drawFloor(t);
-
+function drawFloor(t){
     ctx.save();
-
-    /*
-     * 目标的亮感主要来自高密度粒子叠加，
-     * 不是 Gaussian blur / Bloom。
-     */
-    ctx.globalCompositeOperation=
-        "lighter";
-
-    /*
-     * 每帧随机 halo
-     */
-    drawHalo(
-        curve,
-        rot,
-        t
-    );
-
-    /*
-     * 中心 -> 边缘 -> 轮廓
-     *
-     * 越靠边越亮。
-     */
-    drawCloud(
-        center,
-        ratio,
-        rot,
-        t,
-        3,
-        "rgb(255,143,196)",
-        .23
-    );
-
-    drawCloud(
-        edge,
-        ratio,
-        rot,
-        t,
-        2,
-        "rgb(255,177,215)",
-        .48
-    );
-
-    drawCloud(
-        contour,
-        ratio,
-        rot,
-        t,
-        1,
-        "rgb(255,226,239)",
-        .88
-    );
-
-    /*
-     * 动态环绕光环
-     */
-    drawOrbits(
-        t,
-        ph
-    );
-
-    ctx.restore();
-
-    /*
-     * 心尖能量流
-     */
-    drawStream(
-        t,
-        ratio,
-        rot
-    );
-
-    /*
-     * 12.25 秒左右进入爆发阶段
-     */
-    drawBurst(
-        ph,
-        ratio
-    );
-}
-
-addEventListener(
-    "resize",
-    ()=>{
-
-        clearTimeout(
-            resizeTimer
-        );
-
-        resizeTimer=
-            setTimeout(
-                resize,
-                100
-            );
-    },
-    {
-        passive:true
+    ctx.globalCompositeOperation="lighter";
+    const maxR=Math.min(W*.36,scale*18.6);
+    const yScale=.23;
+    const spokes=mobile()?42:64;
+    for(let i=0;i<spokes;i++){
+        const a=i/spokes*TAU+t*.012;
+        const x2=cx+Math.cos(a)*maxR;
+        const y2=floorY+Math.sin(a)*maxR*yScale;
+        const gr=ctx.createLinearGradient(cx,floorY,x2,y2);
+        gr.addColorStop(0,"rgba(255,248,252,.34)");
+        gr.addColorStop(.24,"rgba(255,188,224,.14)");
+        gr.addColorStop(1,"rgba(255,120,195,0)");
+        ctx.globalAlpha=.42;
+        ctx.strokeStyle=gr;
+        ctx.lineWidth=.45;
+        ctx.beginPath();
+        ctx.moveTo(cx,floorY);
+        ctx.lineTo(x2,y2);
+        ctx.stroke();
     }
-);
-
+    const rings=mobile()?19:29;
+    for(let r=1;r<=rings;r++){
+        const q=r/rings;
+        const base=maxR*Math.pow(q,1.40);
+        ctx.beginPath();
+        for(let j=0;j<=180;j++){
+            const a=j/180*TAU;
+            const wave=1+(.135*(1-q)+.015)*Math.sin(a*12-t*.55+r*.42)+.010*Math.sin(a*27+t*.18+r*.3);
+            const rr=base*wave;
+            const x=cx+Math.cos(a)*rr;
+            const y=floorY+Math.sin(a)*rr*yScale;
+            if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+        }
+        ctx.globalAlpha=.08+.28*(1-q);
+        ctx.strokeStyle=r<6?"rgb(255,244,249)":"rgb(255,170,214)";
+        ctx.lineWidth=r<6?.85:.5;
+        ctx.stroke();
+    }
+    ctx.fillStyle="#ffd9ea";
+    for(const d of floorDots){
+        const rr=d.r*maxR;
+        const a=d.a+t*.010*(1-d.r);
+        const x=cx+Math.cos(a)*rr;
+        const y=floorY+Math.sin(a)*rr*yScale;
+        ctx.globalAlpha=d.alpha*(1-d.r*.55);
+        ctx.fillRect(x,y,d.s,d.s);
+    }
+    for(let i=0;i<7;i++){
+        const k=1+Math.sin(t*1.15-i*.52)*.025;
+        const rx=(10+i*10.5)*k;
+        const ry=(2.1+i*2.1)*k;
+        ctx.globalAlpha=.42-i*.043;
+        ctx.strokeStyle=i<2?"#fff8fc":"#ffb4da";
+        ctx.lineWidth=i<2?1:.65;
+        ctx.beginPath();
+        ctx.ellipse(cx,floorY,rx,ry,0,0,TAU);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+function heartPath(){
+    ctx.beginPath();
+    for(let i=0;i<=320;i++){
+        const p=heart(i/320*TAU,scale);
+        const x=cx+p.x;
+        const y=cy+p.y;
+        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+}
+function drawHeartGlow(t){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    const s=Math.min(W,H)*.40;
+    ctx.globalAlpha=.15;
+    ctx.drawImage(glowSoft,cx-s*.5,cy-s*.44,s,s);
+    heartPath();
+    ctx.strokeStyle="rgba(255,225,238,.06)";
+    ctx.lineWidth=scale*.52;
+    ctx.stroke();
+    heartPath();
+    ctx.strokeStyle="rgba(255,155,206,.06)";
+    ctx.lineWidth=scale*1.05;
+    ctx.stroke();
+    ctx.restore();
+}
+function drawFills(t){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#ff9dca";
+    for(let i=0;i<fills.length;i++){
+        const p=fills[i];
+        const dx=Math.sin(t*.35+p.seed*TAU*3)*scale*.028;
+        const dy=Math.cos(t*.31+p.seed*TAU*2)*scale*.028;
+        const s=p.size;
+        ctx.globalAlpha=p.alpha*(.72+.28*Math.sin(t*.7+p.seed*16));
+        if(p.hot){
+            const hs=3.6;
+            ctx.drawImage(glowPink,cx+p.x+dx-hs*.5,cy+p.y+dy-hs*.5,hs,hs);
+        }else{
+            ctx.fillRect(cx+p.x+dx-s*.5,cy+p.y+dy-s*.5,s,s);
+        }
+    }
+    ctx.restore();
+}
+function drawEdge(t,frameNo){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#ffc8df";
+    for(let i=0;i<edge.length;i++){
+        const p=edge[i];
+        const jx=(hash01(i,frameNo,31)-.5)*1.2;
+        const jy=(hash01(i,frameNo,59)-.5)*1.2;
+        const drift=Math.sin(t*.55+p.seed*18)*scale*.015;
+        const s=p.size;
+        ctx.globalAlpha=p.alpha*(.76+.24*Math.sin(t*1.0+p.seed*25));
+        if(p.hot){
+            const hs=4.2;
+            ctx.drawImage(glowWhite,cx+p.x+jx+drift-hs*.5,cy+p.y+jy-hs*.5,hs,hs);
+        }else{
+            ctx.fillRect(cx+p.x+jx+drift-s*.5,cy+p.y+jy-s*.5,s,s);
+        }
+    }
+    ctx.restore();
+}
+function drawContour(t,frameNo){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#fff1f7";
+    for(let i=0;i<contour.length;i++){
+        const p=contour[i];
+        const tt=p.t+t*(.020+p.seed*.028)*p.dir;
+        const hp=heart(tt,scale*p.rad);
+        const hd=heartD(tt,scale*p.rad);
+        const len=Math.hypot(hd.x,hd.y)||1;
+        const nx=-hd.y/len;
+        const ny=hd.x/len;
+        const thickness=p.band*scale+Math.sin(tt*8+t*.8+p.seed*23)*scale*.025;
+        const jx=(hash01(i,frameNo,7)-.5)*1.6;
+        const jy=(hash01(i,frameNo,13)-.5)*1.6;
+        const x=cx+hp.x+nx*thickness+jx;
+        const y=cy+hp.y+ny*thickness+jy;
+        const s=p.size;
+        ctx.globalAlpha=p.alpha*(.82+.18*Math.sin(t*(1.4+p.seed)+p.seed*37));
+        if(p.hot){
+            const hs=5.2;
+            ctx.drawImage(glowWhite,x-hs*.5,y-hs*.5,hs,hs);
+        }else{
+            ctx.fillRect(x-s*.5,y-s*.5,s,s);
+        }
+    }
+    ctx.restore();
+}
+function drawNotchStream(t){
+    const notch=heart(0,scale);
+    const sx=cx+notch.x;
+    const sy=cy+notch.y;
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    for(const p of notchStream){
+        const q=fract(p.q+t*p.speed);
+        const yy=sy+q*scale*7.3;
+        const xx=sx+Math.sin(p.phase+t*1.8+q*12)*scale*.04;
+        ctx.globalAlpha=p.alpha*(1-q)*(.55+.45*Math.sin(q*Math.PI));
+        if(p.s>1.4){
+            const s=p.s;
+            ctx.drawImage(glowWhite,xx-s*.5,yy-s*.5,s,s);
+        }else{
+            ctx.fillStyle="#ffd5e8";
+            ctx.fillRect(xx-p.s*.5,yy-p.s*.5,p.s,p.s);
+        }
+    }
+    ctx.globalAlpha=.40;
+    ctx.drawImage(glowWhite,sx-10,sy-12,20,20);
+    ctx.restore();
+}
+function drawTipStream(t){
+    const tip=heart(Math.PI,scale);
+    const tx=cx+tip.x;
+    const ty=cy+tip.y;
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    for(const p of stream){
+        const q=fract(p.q+t*p.speed);
+        const middle=Math.sin(q*Math.PI);
+        const yy=ty+(floorY-ty)*q;
+        const xx=tx+Math.sin(p.phase+t*2+q*12)*scale*.11*middle;
+        ctx.globalAlpha=p.alpha*middle;
+        if(p.s>1.5){
+            const s=p.s;
+            ctx.drawImage(glowWhite,xx-s*.5,yy-s*.5,s,s);
+        }else{
+            ctx.fillStyle="#ffd0e6";
+            ctx.fillRect(xx-p.s*.5,yy-p.s*.5,p.s,p.s);
+        }
+    }
+    ctx.globalAlpha=.58;
+    ctx.drawImage(glowWhite,tx-10,ty-10,20,20);
+    ctx.restore();
+}
+function animate(now){
+    requestAnimationFrame(animate);
+    const t=now*.001;
+    const frameNo=(now/16.666)|0;
+    drawBackground(t);
+    drawFloor(t);
+    drawHeartGlow(t);
+    drawFills(t);
+    drawEdge(t,frameNo);
+    drawContour(t,frameNo);
+    drawNotchStream(t);
+    drawTipStream(t);
+}
+addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(resize,100)},{passive:true});
+makeSprites();
 resize();
-
-requestAnimationFrame(
-    animate
-);
-
+requestAnimationFrame(animate);
 })();
 </script>
-
 </body>
 </html>
