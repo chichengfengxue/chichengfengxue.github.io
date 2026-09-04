@@ -6,21 +6,20 @@
 <title>Love</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#06030b}
-body{background:#06030b}
+html,body{width:100%;height:100%;overflow:hidden;background:#050208}
+body{background:radial-gradient(circle at 50% 34%,#241021 0,#0c0612 38%,#050208 72%)}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .home{
-    position:fixed;top:20px;left:22px;z-index:10;
+    position:fixed;left:22px;top:20px;z-index:10;
     color:rgba(255,225,242,.25);text-decoration:none;
     font:10px Arial,sans-serif;letter-spacing:3px;transition:.35s
 }
-.home:hover{color:#fff0f8;text-shadow:0 0 15px #ff71c1}
+.home:hover{color:#fff2fa;text-shadow:0 0 15px #ff6fbd}
 </style>
 </head>
 <body>
 <a class="home" href="/">HOME</a>
 <canvas id="c"></canvas>
-
 <script>
 (()=>{
 "use strict";
@@ -28,42 +27,32 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 const canvas=document.getElementById("c");
 const ctx=canvas.getContext("2d",{alpha:false});
 const TAU=Math.PI*2;
-const CURVE_N=2048;
+const CURVE_N=4096;
+let W=0,H=0,DPR=1,last=performance.now();
+let mx=0,my=0,tmx=0,tmy=0;
+let first=true,beatWasHigh=false;
 
-let W=0,H=0,DPR=1;
-let mouseX=0,mouseY=0,targetMouseX=0,targetMouseY=0;
-let firstFrame=true,lastTime=performance.now();
-let burstAccumulator=0;
+const cxArr=new Float32Array(CURVE_N);
+const cyArr=new Float32Array(CURVE_N);
+const nxArr=new Float32Array(CURVE_N);
+const nyArr=new Float32Array(CURVE_N);
+const txArr=new Float32Array(CURVE_N);
+const tyArr=new Float32Array(CURVE_N);
 
-const curveX=new Float32Array(CURVE_N);
-const curveY=new Float32Array(CURVE_N);
-const curveNX=new Float32Array(CURVE_N);
-const curveNY=new Float32Array(CURVE_N);
-
-const flowGroups=[[],[],[]];
-let hotFlow=[];
-let dust=[];
-let rays=[];
+let flow=[];
+let inner=[];
 let ribbons=[];
-let bursts=[];
-let floorDots=[];
-let streamDust=[];
+let comets=[];
+let sparks=[];
 let stars=[];
-
-let glowWhite,glowPink,glowSoft;
-
-const COLORS=[
-    "rgba(255,237,248,1)",
-    "rgba(255,160,216,1)",
-    "rgba(230,93,186,1)"
-];
+let floorDust=[];
+let tipDust=[];
+let glowWhite,glowPink,glowPurple;
 
 function rand(a,b){return a+Math.random()*(b-a)}
+function gauss(){return Math.random()+Math.random()+Math.random()+Math.random()-2}
+function norm(u){u%=1;return u<0?u+1:u}
 function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
-function normU(u){u%=1;if(u<0)u+=1;return u}
-function gaussian(){
-    return Math.random()+Math.random()+Math.random()+Math.random()-2;
-}
 
 function heart(t){
     const s=Math.sin(t);
@@ -75,999 +64,761 @@ function heart(t){
 
 function buildCurve(){
     for(let i=0;i<CURVE_N;i++){
-        const t=i/CURVE_N*TAU;
-        const p=heart(t);
-        curveX[i]=p[0];
-        curveY[i]=p[1];
+        const p=heart(i/CURVE_N*TAU);
+        cxArr[i]=p[0];
+        cyArr[i]=p[1];
     }
-
     for(let i=0;i<CURVE_N;i++){
-        const a=(i-2+CURVE_N)%CURVE_N;
-        const b=(i+2)%CURVE_N;
-
-        let dx=curveX[b]-curveX[a];
-        let dy=curveY[b]-curveY[a];
+        const a=(i-3+CURVE_N)%CURVE_N;
+        const b=(i+3)%CURVE_N;
+        let dx=cxArr[b]-cxArr[a];
+        let dy=cyArr[b]-cyArr[a];
         const l=Math.hypot(dx,dy)||1;
-
-        dx/=l;
-        dy/=l;
-
-        let nx=-dy;
-        let ny=dx;
-
-        if(nx*curveX[i]+ny*curveY[i]<0){
-            nx=-nx;
-            ny=-ny;
-        }
-
-        curveNX[i]=nx;
-        curveNY[i]=ny;
+        dx/=l;dy/=l;
+        let nx=-dy,ny=dx;
+        if(nx*cxArr[i]+ny*cyArr[i]<0){nx=-nx;ny=-ny}
+        nxArr[i]=nx;nyArr[i]=ny;
+        txArr[i]=-ny;tyArr[i]=nx;
     }
 }
 
-function sampleCurve(u){
-    u=normU(u);
-
+function sample(u){
+    u=norm(u);
     const f=u*CURVE_N;
     const i=Math.floor(f)%CURVE_N;
     const j=(i+1)%CURVE_N;
     const a=f-Math.floor(f);
-
-    let nx=curveNX[i]+(curveNX[j]-curveNX[i])*a;
-    let ny=curveNY[i]+(curveNY[j]-curveNY[i])*a;
-    const nl=Math.hypot(nx,ny)||1;
-    nx/=nl;
-    ny/=nl;
-
-    const x=curveX[i]+(curveX[j]-curveX[i])*a;
-    const y=curveY[i]+(curveY[j]-curveY[i])*a;
-
-    const tx=-ny;
-    const ty=nx;
-
-    return {x,y,nx,ny,tx,ty};
+    let nx=nxArr[i]+(nxArr[j]-nxArr[i])*a;
+    let ny=nyArr[i]+(nyArr[j]-nyArr[i])*a;
+    const l=Math.hypot(nx,ny)||1;
+    nx/=l;ny/=l;
+    return {
+        x:cxArr[i]+(cxArr[j]-cxArr[i])*a,
+        y:cyArr[i]+(cyArr[j]-cyArr[i])*a,
+        nx,ny,tx:-ny,ty:nx
+    };
 }
 
-function makeGlow(size,c0,c1,c2){
+function sprite(size,c0,c1,c2){
     const c=document.createElement("canvas");
     c.width=c.height=size;
     const g=c.getContext("2d");
     const r=size/2;
-
-    const grad=g.createRadialGradient(r,r,0,r,r,r);
-    grad.addColorStop(0,c0);
-    grad.addColorStop(.09,c0);
-    grad.addColorStop(.25,c1);
-    grad.addColorStop(.58,c2);
-    grad.addColorStop(1,"rgba(255,80,190,0)");
-
-    g.fillStyle=grad;
+    const gr=g.createRadialGradient(r,r,0,r,r,r);
+    gr.addColorStop(0,c0);
+    gr.addColorStop(.08,c0);
+    gr.addColorStop(.25,c1);
+    gr.addColorStop(.58,c2);
+    gr.addColorStop(1,"rgba(255,70,180,0)");
+    g.fillStyle=gr;
     g.fillRect(0,0,size,size);
     return c;
 }
 
-function createSprites(){
-    glowWhite=makeGlow(
-        96,
-        "rgba(255,255,255,1)",
-        "rgba(255,232,246,.95)",
-        "rgba(255,132,205,.20)"
-    );
-
-    glowPink=makeGlow(
-        72,
-        "rgba(255,243,250,.88)",
-        "rgba(255,135,205,.72)",
-        "rgba(242,79,180,.15)"
-    );
-
-    glowSoft=makeGlow(
-        128,
-        "rgba(255,190,226,.22)",
-        "rgba(232,83,188,.13)",
-        "rgba(167,48,154,.05)"
-    );
+function makeSprites(){
+    glowWhite=sprite(96,"rgba(255,255,255,1)","rgba(255,221,241,.95)","rgba(255,92,189,.13)");
+    glowPink=sprite(72,"rgba(255,241,250,.92)","rgba(255,116,198,.72)","rgba(229,63,169,.11)");
+    glowPurple=sprite(128,"rgba(255,120,204,.22)","rgba(194,55,169,.12)","rgba(104,30,129,.04)");
 }
 
-function getLayout(){
+function layout(){
     const mobile=W<700;
-
-    const heartWidth=Math.min(
-        W*(mobile?.80:.52),
-        H*(mobile?.72:.74)
-    );
-
+    const width=Math.min(W*(mobile?.84:.50),H*(mobile?.72:.72));
     return {
-        cx:W*.5+mouseX*4,
-        cy:H*(mobile?.34:.34)+mouseY*2,
-        scale:heartWidth/32
+        x:W*.5+mx*5,
+        y:H*(mobile?.335:.335)+my*3,
+        s:width/32
     };
 }
 
-function heartbeat(t){
+function beatInfo(t){
     const q=t%1.48;
     let b=0;
-
-    if(q<.105)b=Math.sin(q/.105*Math.PI);
-    if(q>.17&&q<.285)b+=.47*Math.sin((q-.17)/.115*Math.PI);
-
-    return 1+b*.020+Math.sin(t*.65)*.0035;
+    if(q<.10)b=Math.sin(q/.10*Math.PI);
+    if(q>.17&&q<.285)b+=.48*Math.sin((q-.17)/.115*Math.PI);
+    return {b,pulse:1+b*.022+Math.sin(t*.67)*.003};
 }
 
-function localWidth(u,t,scale){
-    const a=Math.sin(u*TAU*3.0-t*.41);
-    const b=Math.sin(u*TAU*8.0+t*.29);
-    const c=Math.sin(u*TAU*17.0-t*.17);
-
-    return scale*(
-        .63+
-        a*.095+
-        b*.065+
-        c*.025
+function bandWidth(u,t,s){
+    return s*(
+        .62+
+        .10*Math.sin(u*TAU*3-t*.48)+
+        .065*Math.sin(u*TAU*7+t*.31)+
+        .038*Math.sin(u*TAU*15-t*.22)
     );
 }
 
-function targetPosition(p,t,layout,pulse){
-    const u=normU(p.u);
-    const c=sampleCurve(u);
-
-    const width=localWidth(u,t,layout.scale);
-
-    const turbulence=
-        Math.sin(u*TAU*9+t*.92+p.phase)*width*.13+
-        Math.sin(u*TAU*21-t*.47+p.phase*1.7)*width*.055;
-
-    const offset=
-        p.band*width+
-        turbulence;
-
-    const wave=
-        Math.sin(u*TAU*5-t*.28)*
-        layout.scale*.055;
-
+function flowPos(p,t,L,pulse){
+    const c=sample(p.u);
+    const bw=bandWidth(p.u,t,L.s);
+    const braid=
+        Math.sin(p.u*TAU*6+t*p.braidSpeed+p.phase)*bw*.24+
+        Math.sin(p.u*TAU*17-t*.54+p.phase*1.7)*bw*.07;
+    const off=p.band*bw+braid;
     return {
-        x:layout.cx+
-          c.x*layout.scale*pulse+
-          c.nx*(offset+wave),
-
-        y:layout.cy+
-          c.y*layout.scale*pulse+
-          c.ny*(offset+wave),
-
-        nx:c.nx,
-        ny:c.ny,
-        tx:c.tx,
-        ty:c.ty
+        x:L.x+c.x*L.s*pulse+c.nx*off,
+        y:L.y+c.y*L.s*pulse+c.ny*off,
+        nx:c.nx,ny:c.ny,tx:c.tx,ty:c.ty
     };
 }
 
 function createFlow(){
-    for(const g of flowGroups)g.length=0;
-    hotFlow.length=0;
-
-    const mobile=W<700;
-    const count=mobile?3800:7600;
-
-    for(let i=0;i<count;i++){
+    flow=[];
+    const n=W<700?3600:8200;
+    const L=layout();
+    for(let i=0;i<n;i++){
         const r=Math.random();
-
-        let band=gaussian()*.52;
-
-        if(r>.82)band*=1.55;
-        if(r>.96)band*=2.1;
-
-        const tone=
-            Math.random()<.40?0:
-            Math.random()<.72?1:2;
-
+        let band=gauss()*.49;
+        if(r>.82)band*=1.65;
+        if(r>.96)band*=2.3;
         const p={
             u:Math.random(),
             band,
+            speed:rand(.025,.072)*(Math.random()<.09?-1:1),
             phase:rand(0,TAU),
-            speed:rand(.022,.060)*(Math.random()<.10?-1:1),
-            x:0,y:0,px:0,py:0,
-            vx:0,vy:0,
-            size:rand(.45,1.15),
-            alpha:rand(.50,1),
-            tone,
-            hot:Math.random()<.035,
-            hotSize:rand(4,10)
+            braidSpeed:rand(.65,1.45),
+            size:Math.random()<.90?rand(.42,1.05):rand(1.1,2),
+            alpha:rand(.42,1),
+            hot:Math.random()<.045,
+            x:0,y:0,px:0,py:0
         };
-
-        flowGroups[tone].push(p);
-        if(p.hot)hotFlow.push(p);
-    }
-
-    const L=getLayout();
-    const pulse=heartbeat(0);
-
-    for(const group of flowGroups){
-        for(const p of group){
-            const q=targetPosition(p,0,L,pulse);
-            p.x=p.px=q.x+gaussian()*2;
-            p.y=p.py=q.y+gaussian()*2;
-        }
+        const q=flowPos(p,0,L,1);
+        p.x=p.px=q.x;
+        p.y=p.py=q.y;
+        flow.push(p);
     }
 }
 
-function createDust(){
-    dust.length=0;
-
-    const count=W<700?650:1550;
-
-    for(let i=0;i<count;i++){
-        dust.push({
+function createInner(){
+    inner=[];
+    const n=W<700?650:1600;
+    for(let i=0;i<n;i++){
+        inner.push({
             u:Math.random(),
-            radius:Math.pow(Math.random(),.55)*.80,
+            r:Math.pow(Math.random(),.58)*.79,
             phase:rand(0,TAU),
-            size:Math.random()<.94?rand(.45,1.1):rand(2,4),
-            alpha:rand(.06,.36),
-            hot:Math.random()<.03
-        });
-    }
-}
-
-function createRays(){
-    rays.length=0;
-
-    const count=W<700?65:145;
-
-    for(let i=0;i<count;i++){
-        rays.push({
-            u:Math.random(),
-            phase:rand(0,TAU),
-            speed:rand(.11,.31),
-            length:rand(.08,.28),
-            start:rand(3,40),
-            width:rand(.35,1.05),
-            alpha:rand(.035,.16)
+            size:Math.random()<.94?rand(.4,1):rand(2,4),
+            alpha:rand(.05,.32)
         });
     }
 }
 
 function createRibbons(){
-    ribbons.length=0;
-
-    const count=W<700?13:26;
-
-    for(let i=0;i<count;i++){
+    ribbons=[];
+    const n=W<700?11:23;
+    for(let i=0;i<n;i++){
         ribbons.push({
             u:Math.random(),
-            speed:rand(.035,.092)*(Math.random()<.12?-1:1),
-            band:gaussian()*.30,
+            speed:rand(.045,.11)*(Math.random()<.18?-1:1),
+            len:rand(.025,.075),
+            band:gauss()*.32,
             phase:rand(0,TAU),
-            length:rand(.016,.045),
-            alpha:rand(.10,.35),
-            width:rand(.6,1.35)
+            width:rand(.55,1.45),
+            alpha:rand(.12,.42)
         });
     }
+}
+
+function resetComet(c,L,t,pulse,initial=false){
+    const u=Math.random();
+    const h=sample(u);
+    const bw=bandWidth(u,t,L.s);
+    const off=gauss()*bw*.72;
+    const x=L.x+h.x*L.s*pulse+h.nx*off;
+    const y=L.y+h.y*L.s*pulse+h.ny*off;
+
+    const outward=rand(80,230);
+    const tangent=rand(-125,125);
+
+    c.x=x;c.y=y;c.px=x;c.py=y;
+    c.vx=h.nx*outward+h.tx*tangent;
+    c.vy=h.ny*outward+h.ty*tangent;
+    c.life=rand(.70,1.65);
+    c.age=initial?Math.random()*c.life:0;
+    c.phase=rand(0,TAU);
+    c.curve=rand(.55,1.6)*(Math.random()<.5?-1:1);
+    c.alpha=rand(.18,.65);
+    c.width=rand(.45,1.25);
+    c.hot=Math.random()<.20;
+    c.history=[];
+    for(let j=0;j<14;j++)c.history.push({x,y});
+}
+
+function createComets(){
+    comets=[];
+    const L=layout();
+    const n=W<700?85:190;
+    for(let i=0;i<n;i++){
+        const c={};
+        resetComet(c,L,0,1,true);
+        comets.push(c);
+    }
+}
+
+function createSparks(){
+    sparks=[];
 }
 
 function createStars(){
-    stars.length=0;
-
-    const count=W<700?350:900;
-
-    for(let i=0;i<count;i++){
+    stars=[];
+    const n=W<700?320:850;
+    for(let i=0;i<n;i++){
         stars.push({
             x:Math.random(),
             y:Math.random(),
-            size:Math.random()<.97?rand(.35,1):rand(2,3.5),
-            alpha:rand(.03,.28),
-            phase:rand(0,TAU)
+            size:Math.random()<.97?rand(.35,.9):rand(1.5,3.5),
+            a:rand(.025,.24),
+            phase:rand(0,TAU),
+            drift:rand(.4,1.2)
         });
     }
 }
 
-function createFloorDots(){
-    floorDots.length=0;
-
-    const count=W<700?600:1500;
-
-    for(let i=0;i<count;i++){
-        floorDots.push({
+function createFloor(){
+    floorDust=[];
+    const n=W<700?500:1350;
+    for(let i=0;i<n;i++){
+        floorDust.push({
             r:Math.sqrt(Math.random()),
             a:Math.random()*TAU,
-            alpha:rand(.04,.24),
-            size:rand(.35,.9)
+            alpha:rand(.04,.22),
+            size:rand(.35,.85)
         });
     }
-
-    streamDust.length=0;
-
-    const streamCount=W<700?100:230;
-
-    for(let i=0;i<streamCount;i++){
-        streamDust.push({
+    tipDust=[];
+    const k=W<700?90:210;
+    for(let i=0;i<k;i++){
+        tipDust.push({
             q:Math.random(),
             phase:rand(0,TAU),
-            alpha:rand(.20,.85),
-            size:Math.random()<.9?rand(.5,1.2):rand(2,4)
+            size:Math.random()<.92?rand(.45,1):rand(2,4),
+            alpha:rand(.18,.80)
         });
     }
 }
 
 function recreate(){
     createFlow();
-    createDust();
-    createRays();
+    createInner();
     createRibbons();
+    createComets();
+    createSparks();
     createStars();
-    createFloorDots();
-    bursts.length=0;
+    createFloor();
 }
 
 function resize(){
     W=innerWidth;
     H=innerHeight;
     DPR=Math.min(devicePixelRatio||1,1.7);
-
     canvas.width=Math.round(W*DPR);
     canvas.height=Math.round(H*DPR);
-
     canvas.style.width=W+"px";
     canvas.style.height=H+"px";
-
     ctx.setTransform(DPR,0,0,DPR,0,0);
-
-    firstFrame=true;
+    first=true;
     recreate();
 }
 
-function drawBackground(t,layout){
+function background(t,L){
     ctx.globalCompositeOperation="source-over";
+    ctx.fillStyle=first?"#050208":"rgba(5,2,8,.24)";
+    ctx.fillRect(0,0,W,H);
 
-    if(firstFrame){
-        ctx.fillStyle="#06030b";
-        ctx.fillRect(0,0,W,H);
-    }else{
-        ctx.fillStyle="rgba(6,3,11,.20)";
-        ctx.fillRect(0,0,W,H);
-    }
-
-    const radius=Math.max(W,H)*.50;
-
-    const g=ctx.createRadialGradient(
-        layout.cx,
-        layout.cy-H*.01,
-        0,
-        layout.cx,
-        layout.cy,
-        radius
-    );
-
-    g.addColorStop(0,"rgba(91,28,74,.055)");
-    g.addColorStop(.30,"rgba(61,19,59,.035)");
-    g.addColorStop(.67,"rgba(18,7,27,.015)");
+    const R=Math.max(W,H)*.48;
+    const g=ctx.createRadialGradient(L.x,L.y,0,L.x,L.y,R);
+    g.addColorStop(0,"rgba(91,28,74,.060)");
+    g.addColorStop(.33,"rgba(50,15,50,.032)");
+    g.addColorStop(.70,"rgba(14,6,22,.010)");
     g.addColorStop(1,"rgba(0,0,0,0)");
-
     ctx.fillStyle=g;
     ctx.fillRect(0,0,W,H);
 
     ctx.globalCompositeOperation="lighter";
-
     for(const s of stars){
-        const alpha=s.alpha*(.55+.45*Math.sin(t*.35+s.phase));
-
-        ctx.globalAlpha=alpha;
-        ctx.fillStyle="rgb(239,143,209)";
-
+        const y=norm(s.y+t*.0007*s.drift)*H;
+        const a=s.a*(.55+.45*Math.sin(t*.5+s.phase));
+        ctx.globalAlpha=a;
+        ctx.fillStyle="#f6a8d7";
         const x=s.x*W;
-        const y=s.y*H;
-
-        if(s.size<1.4){
-            ctx.fillRect(x,y,s.size,s.size);
-        }else{
-            ctx.drawImage(
-                glowPink,
-                x-s.size,
-                y-s.size,
-                s.size*2,
-                s.size*2
-            );
-        }
+        if(s.size<1.4)ctx.fillRect(x,y,s.size,s.size);
+        else ctx.drawImage(glowPink,x-s.size,y-s.size,s.size*2,s.size*2);
     }
-
     ctx.globalAlpha=1;
 }
 
-function drawRays(t,layout,pulse){
+function drawMist(L,t){
+    const s=Math.min(W,H)*.55;
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.globalAlpha=.075+.018*Math.sin(t*.6);
+    ctx.drawImage(glowPurple,L.x-s/2,L.y-s*.46,s,s);
+    ctx.restore();
+}
+
+function drawInner(t,L,pulse){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#f59acb";
+
+    for(const p of inner){
+        const c=sample(p.u);
+        const drift=Math.sin(t*.35+p.phase)*L.s*.07;
+        const r=p.r+.007*Math.sin(t*.24+p.phase);
+
+        const x=L.x+c.x*L.s*r*pulse+c.nx*drift;
+        const y=L.y+c.y*L.s*r*pulse+c.ny*drift;
+
+        ctx.globalAlpha=p.alpha*(.5+.5*Math.sin(t*(.5+p.alpha)+p.phase));
+
+        if(p.size<1.4)ctx.fillRect(x,y,p.size,p.size);
+        else ctx.drawImage(glowPink,x-p.size,y-p.size,p.size*2,p.size*2);
+    }
+    ctx.restore();
+}
+
+function drawFlow(t,dt,L,pulse){
     ctx.save();
     ctx.globalCompositeOperation="lighter";
     ctx.lineCap="round";
 
-    const maxDim=Math.max(W,H);
+    const colors=["#fff0f8","#ff8fcb","#d948a0"];
+    const widths=[.82,.70,.55];
 
-    for(const r of rays){
-        const c=sampleCurve(r.u);
-
-        const hx=layout.cx+c.x*layout.scale*pulse;
-        const hy=layout.cy+c.y*layout.scale*pulse;
-
-        const pulseRay=Math.pow(
-            Math.max(0,Math.sin(t*r.speed+r.phase)),
-            4
-        );
-
-        if(pulseRay<.01)continue;
-
-        let ox=c.nx;
-        let oy=c.ny;
-
-        const start=r.start+
-            Math.sin(t*.4+r.phase)*8;
-
-        const length=maxDim*r.length*(.65+.35*pulseRay);
-
-        const sx=hx+ox*start;
-        const sy=hy+oy*start;
-
-        const ex=sx+ox*length;
-        const ey=sy+oy*length;
-
-        const grad=ctx.createLinearGradient(sx,sy,ex,ey);
-        grad.addColorStop(0,"rgba(255,145,213,.55)");
-        grad.addColorStop(.25,"rgba(229,83,183,.22)");
-        grad.addColorStop(1,"rgba(125,37,130,0)");
-
-        ctx.globalAlpha=r.alpha*pulseRay;
-        ctx.strokeStyle=grad;
-        ctx.lineWidth=r.width;
-
-        ctx.beginPath();
-        ctx.moveTo(sx,sy);
-        ctx.lineTo(ex,ey);
-        ctx.stroke();
-    }
-
-    ctx.restore();
-}
-
-function drawDust(t,layout,pulse){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-
-    ctx.fillStyle="rgba(245,161,217,1)";
-
-    for(const p of dust){
-        const c=sampleCurve(p.u);
-
-        const drift=
-            Math.sin(t*.33+p.phase)*layout.scale*.09;
-
-        const r=p.radius+
-            Math.sin(t*.17+p.phase)*.006;
-
-        const x=
-            layout.cx+
-            c.x*layout.scale*r*pulse+
-            c.nx*drift;
-
-        const y=
-            layout.cy+
-            c.y*layout.scale*r*pulse+
-            c.ny*drift;
-
-        const shimmer=.5+.5*Math.sin(t*(.5+p.alpha)+p.phase);
-
-        ctx.globalAlpha=p.alpha*(.45+.55*shimmer);
-
-        if(p.hot){
-            const s=p.size*2.4;
-            ctx.drawImage(glowWhite,x-s/2,y-s/2,s,s);
-        }else if(p.size>1.5){
-            const s=p.size*2;
-            ctx.drawImage(glowPink,x-s/2,y-s/2,s,s);
-        }else{
-            ctx.fillRect(x,y,p.size,p.size);
-        }
-    }
-
-    ctx.restore();
-}
-
-function updateFlow(t,dt,layout,pulse){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
-
-    for(let tone=0;tone<3;tone++){
-        const group=flowGroups[tone];
-
+    for(let layer=0;layer<3;layer++){
         ctx.beginPath();
 
-        for(const p of group){
-            p.px=p.x;
-            p.py=p.y;
+        for(let i=layer;i<flow.length;i+=3){
+            const p=flow[i];
 
-            p.u=normU(p.u+p.speed*dt);
+            p.px=p.x;p.py=p.y;
+            p.u=norm(p.u+p.speed*dt);
 
-            const q=targetPosition(p,t,layout,pulse);
+            const q=flowPos(p,t,L,pulse);
 
-            const dx=q.x-p.x;
-            const dy=q.y-p.y;
+            p.x=q.x;
+            p.y=q.y;
 
-            p.vx+=dx*.060;
-            p.vy+=dy*.060;
-
-            const swirl=
-                Math.sin(t*.8+p.phase+p.u*TAU*7);
-
-            p.vx+=q.tx*swirl*.012;
-            p.vy+=q.ty*swirl*.012;
-
-            p.vx*=.875;
-            p.vy*=.875;
-
-            p.x+=p.vx;
-            p.y+=p.vy;
-
-            const movement=Math.hypot(p.x-p.px,p.y-p.py);
-
-            if(movement<12){
+            if(Math.hypot(p.x-p.px,p.y-p.py)<15){
                 ctx.moveTo(p.px,p.py);
                 ctx.lineTo(p.x,p.y);
             }
         }
 
-        ctx.globalAlpha=tone===0?.31:tone===1?.24:.14;
-        ctx.strokeStyle=COLORS[tone];
-        ctx.lineWidth=tone===0?.82:tone===1?.72:.60;
+        ctx.globalAlpha=layer===0?.34:layer===1?.25:.16;
+        ctx.strokeStyle=colors[layer];
+        ctx.lineWidth=widths[layer];
         ctx.stroke();
 
-        ctx.globalAlpha=tone===0?.75:tone===1?.58:.38;
-        ctx.fillStyle=COLORS[tone];
+        ctx.fillStyle=colors[layer];
+        ctx.globalAlpha=layer===0?.68:layer===1?.54:.40;
 
-        for(let i=0;i<group.length;i+=2){
-            const p=group[i];
-            ctx.fillRect(
-                p.x-p.size*.5,
-                p.y-p.size*.5,
-                p.size,
-                p.size
-            );
+        for(let i=layer;i<flow.length;i+=6){
+            const p=flow[i];
+            ctx.fillRect(p.x,p.y,p.size,p.size);
         }
     }
 
-    for(const p of hotFlow){
-        const q=.72+.28*Math.sin(t*2.7+p.phase);
-        const s=p.hotSize*q;
-
-        ctx.globalAlpha=.28+p.alpha*.34;
-
-        ctx.drawImage(
-            glowWhite,
-            p.x-s/2,
-            p.y-s/2,
-            s,s
-        );
+    for(let i=0;i<flow.length;i+=11){
+        const p=flow[i];
+        if(!p.hot)continue;
+        const s=rand(.88,1.12)*5;
+        ctx.globalAlpha=.24;
+        ctx.drawImage(glowWhite,p.x-s/2,p.y-s/2,s,s);
     }
 
     ctx.restore();
 }
 
-function drawRibbons(t,layout,pulse){
+function drawRibbons(t,L,pulse){
     ctx.save();
     ctx.globalCompositeOperation="lighter";
     ctx.lineCap="round";
     ctx.lineJoin="round";
 
     for(const r of ribbons){
-        r.u=normU(r.u+r.speed/60);
+        r.u=norm(r.u+r.speed/60);
 
-        const steps=15;
-
-        let previous=null;
+        const steps=30;
+        let last=null;
 
         for(let i=0;i<steps;i++){
             const q=i/(steps-1);
-
-            const u=normU(
-                r.u-
-                r.length*q*
-                Math.sign(r.speed)
-            );
-
-            const c=sampleCurve(u);
-            const w=localWidth(u,t,layout.scale);
+            const sign=r.speed>0?1:-1;
+            const u=norm(r.u-r.len*q*sign);
+            const c=sample(u);
+            const bw=bandWidth(u,t,L.s);
 
             const offset=
-                r.band*w+
-                Math.sin(
-                    u*TAU*13+
-                    t*.8+
-                    r.phase
-                )*
-                w*.12;
+                r.band*bw+
+                Math.sin(u*TAU*10+t*1.05+r.phase)*bw*.19+
+                Math.sin(u*TAU*23-t*.46+r.phase)*bw*.05;
 
-            const x=
-                layout.cx+
-                c.x*layout.scale*pulse+
-                c.nx*offset;
+            const x=L.x+c.x*L.s*pulse+c.nx*offset;
+            const y=L.y+c.y*L.s*pulse+c.ny*offset;
 
-            const y=
-                layout.cy+
-                c.y*layout.scale*pulse+
-                c.ny*offset;
-
-            if(previous){
-                const alpha=(1-q)*(1-q)*r.alpha;
-
-                ctx.globalAlpha=alpha;
-                ctx.strokeStyle=
-                    q<.3
-                        ?"rgba(255,250,253,1)"
-                        :"rgba(255,150,214,1)";
-
-                ctx.lineWidth=r.width*(1-q*.65);
+            if(last){
+                ctx.globalAlpha=r.alpha*Math.pow(1-q,1.55);
+                ctx.strokeStyle=q<.22?"#fff9fd":"#ff91cb";
+                ctx.lineWidth=r.width*(1-q*.70);
 
                 ctx.beginPath();
-                ctx.moveTo(previous.x,previous.y);
+                ctx.moveTo(last.x,last.y);
                 ctx.lineTo(x,y);
                 ctx.stroke();
             }
 
-            previous={x,y};
+            last={x,y};
+        }
+
+        if(last){
+            ctx.globalAlpha=r.alpha*.22;
+            const s=6;
+            ctx.drawImage(glowWhite,last.x-s/2,last.y-s/2,s,s);
         }
     }
 
     ctx.restore();
 }
 
-function spawnBurst(t,layout,pulse){
-    const u=Math.random();
-    const c=sampleCurve(u);
+function fieldForce(x,y,t,L,phase,curve){
+    const dx=x-L.x;
+    const dy=y-L.y;
+    const r=Math.hypot(dx,dy)||1;
 
-    const width=localWidth(u,t,layout.scale);
-    const offset=gaussian()*width*.75;
+    const rx=dx/r,ry=dy/r;
+    const tx=-ry,ty=rx;
 
-    const x=
-        layout.cx+
-        c.x*layout.scale*pulse+
-        c.nx*offset;
+    const n1=Math.sin(x*.013+t*1.15+phase);
+    const n2=Math.cos(y*.016-t*.86+phase*1.7);
+    const n3=Math.sin((x+y)*.006+t*.53+phase*.7);
 
-    const y=
-        layout.cy+
-        c.y*layout.scale*pulse+
-        c.ny*offset;
+    const swirl=(42+115/(1+r*.012))*curve;
+    const radial=20+16*Math.sin(t*.7+phase);
 
-    const outward=rand(22,95);
-    const tangent=rand(-35,35);
-
-    bursts.push({
-        x,y,px:x,py:y,
-        vx:c.nx*outward+c.tx*tangent,
-        vy:c.ny*outward+c.ty*tangent,
-        life:rand(.55,1.65),
-        age:0,
-        size:Math.random()<.92?rand(.45,1.15):rand(2.5,5.5),
-        tone:Math.random()<.45?0:1,
-        phase:rand(0,TAU)
-    });
+    return {
+        x:tx*swirl+rx*radial+(n1+n3*.5)*28,
+        y:ty*swirl+ry*radial+(n2-n3*.5)*28
+    };
 }
 
-function updateBursts(t,dt,layout,pulse){
-    burstAccumulator+=(W<700?75:165)*dt;
+function updateComets(t,dt,L,pulse,beat){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+    ctx.lineJoin="round";
 
-    while(burstAccumulator>=1){
-        burstAccumulator--;
-        spawnBurst(t,layout,pulse);
+    for(const c of comets){
+        c.age+=dt;
+        if(c.age>c.life||c.x<-100||c.x>W+100||c.y<-100||c.y>H+100){
+            resetComet(c,L,t,pulse,false);
+            continue;
+        }
+
+        c.px=c.x;c.py=c.y;
+
+        const f=fieldForce(c.x,c.y,t,L,c.phase,c.curve);
+
+        c.vx+=f.x*dt*(1+beat*.35);
+        c.vy+=f.y*dt*(1+beat*.35);
+
+        const drag=Math.pow(.988,dt*60);
+        c.vx*=drag;
+        c.vy*=drag;
+
+        c.x+=c.vx*dt;
+        c.y+=c.vy*dt;
+
+        c.history.unshift({x:c.x,y:c.y});
+        if(c.history.length>14)c.history.pop();
+
+        const life=1-c.age/c.life;
+
+        for(let j=1;j<c.history.length;j++){
+            const a=c.history[j-1];
+            const b=c.history[j];
+
+            ctx.globalAlpha=
+                c.alpha*
+                life*
+                Math.pow(1-j/c.history.length,1.7)*
+                .44;
+
+            ctx.strokeStyle=
+                c.hot&&j<4
+                    ?"#fff7fc"
+                    :"#f05ab1";
+
+            ctx.lineWidth=
+                c.width*
+                (1-j/c.history.length*.75);
+
+            ctx.beginPath();
+            ctx.moveTo(a.x,a.y);
+            ctx.lineTo(b.x,b.y);
+            ctx.stroke();
+        }
+
+        const head=c.hot?7:3.5;
+        ctx.globalAlpha=c.alpha*life*(c.hot?.72:.35);
+
+        ctx.drawImage(
+            c.hot?glowWhite:glowPink,
+            c.x-head/2,
+            c.y-head/2,
+            head,head
+        );
     }
 
-    if(bursts.length>1500){
-        bursts.splice(0,bursts.length-1500);
+    ctx.restore();
+}
+
+function spawnBeatBurst(t,L,pulse){
+    const count=W<700?70:165;
+
+    for(let i=0;i<count;i++){
+        const u=Math.random();
+        const c=sample(u);
+        const bw=bandWidth(u,t,L.s);
+        const off=gauss()*bw*.55;
+
+        const x=L.x+c.x*L.s*pulse+c.nx*off;
+        const y=L.y+c.y*L.s*pulse+c.ny*off;
+
+        const speed=rand(55,190);
+
+        sparks.push({
+            x,y,px:x,py:y,
+            vx:c.nx*speed+c.tx*rand(-90,90),
+            vy:c.ny*speed+c.ty*rand(-90,90),
+            age:0,
+            life:rand(.45,1.15),
+            phase:rand(0,TAU),
+            hot:Math.random()<.15,
+            size:rand(.4,1.25)
+        });
     }
+}
+
+function updateSparks(t,dt,L){
+    if(sparks.length>900)sparks.splice(0,sparks.length-900);
 
     ctx.save();
     ctx.globalCompositeOperation="lighter";
     ctx.lineCap="round";
 
-    for(let i=bursts.length-1;i>=0;i--){
-        const p=bursts[i];
-
+    for(let i=sparks.length-1;i>=0;i--){
+        const p=sparks[i];
         p.age+=dt;
 
-        if(p.age>=p.life){
-            bursts.splice(i,1);
+        if(p.age>p.life){
+            sparks.splice(i,1);
             continue;
         }
 
-        p.px=p.x;
-        p.py=p.y;
+        p.px=p.x;p.py=p.y;
 
-        const q=p.age/p.life;
+        const f=fieldForce(p.x,p.y,t,L,p.phase,.45);
+        p.vx+=f.x*dt*.42;
+        p.vy+=f.y*dt*.42;
 
-        p.vx*=Math.pow(.982,dt*60);
-        p.vy*=Math.pow(.982,dt*60);
-
-        p.vx+=Math.sin(t*2+p.phase)*2.5*dt;
-        p.vy+=Math.cos(t*1.7+p.phase)*2.0*dt;
+        p.vx*=Math.pow(.978,dt*60);
+        p.vy*=Math.pow(.978,dt*60);
 
         p.x+=p.vx*dt;
         p.y+=p.vy*dt;
 
-        const fade=(1-q)*(1-q);
+        const life=1-p.age/p.life;
 
-        ctx.globalAlpha=fade*.30;
-        ctx.strokeStyle=COLORS[p.tone];
-        ctx.lineWidth=.65;
+        ctx.globalAlpha=life*.25;
+        ctx.strokeStyle=p.hot?"#fff6fb":"#ff62b8";
+        ctx.lineWidth=.55;
 
         ctx.beginPath();
         ctx.moveTo(p.px,p.py);
         ctx.lineTo(p.x,p.y);
         ctx.stroke();
 
-        ctx.globalAlpha=fade*.85;
+        ctx.globalAlpha=life*(p.hot?.8:.55);
 
-        if(p.size<1.6){
-            ctx.fillStyle=COLORS[p.tone];
-            ctx.fillRect(p.x,p.y,p.size,p.size);
+        if(p.hot){
+            const s=4;
+            ctx.drawImage(glowWhite,p.x-s/2,p.y-s/2,s,s);
         }else{
-            const s=p.size*(1+.5*q);
-            ctx.drawImage(
-                p.tone===0?glowWhite:glowPink,
-                p.x-s/2,
-                p.y-s/2,
-                s,s
-            );
+            ctx.fillStyle="#ffadd7";
+            ctx.fillRect(p.x,p.y,p.size,p.size);
         }
     }
 
     ctx.restore();
 }
 
-function bottomPoint(layout,pulse){
-    const c=sampleCurve(.5);
-
-    return {
-        x:layout.cx+c.x*layout.scale*pulse,
-        y:layout.cy+c.y*layout.scale*pulse
-    };
+function bottomPoint(L,pulse){
+    const c=sample(.5);
+    return {x:L.x+c.x*L.s*pulse,y:L.y+c.y*L.s*pulse};
 }
 
-function drawFloor(t,layout,pulse){
-    const tip=bottomPoint(layout,pulse);
-
-    const floorY=tip.y+Math.max(14,layout.scale*.62);
-
-    const maxR=Math.min(
-        W*(W<700?.62:.39),
-        H*.47
-    );
-
-    const sy=W<700?.21:.19;
+function drawFloor(t,L,pulse,beat){
+    const tip=bottomPoint(L,pulse);
+    const fy=tip.y+Math.max(16,L.s*.72);
+    const maxR=Math.min(W*(W<700?.62:.39),H*.43);
+    const sy=.19;
 
     ctx.save();
     ctx.globalCompositeOperation="lighter";
 
-    const floorGlow=ctx.createRadialGradient(
-        layout.cx,floorY,0,
-        layout.cx,floorY,maxR*.72
-    );
+    const g=ctx.createRadialGradient(L.x,fy,0,L.x,fy,maxR*.75);
+    g.addColorStop(0,"rgba(255,190,230,.075)");
+    g.addColorStop(.30,"rgba(209,77,190,.024)");
+    g.addColorStop(1,"rgba(100,20,120,0)");
+    ctx.fillStyle=g;
+    ctx.fillRect(L.x-maxR,fy-maxR*.26,maxR*2,maxR*.52);
 
-    floorGlow.addColorStop(0,"rgba(255,190,229,.08)");
-    floorGlow.addColorStop(.28,"rgba(212,88,193,.025)");
-    floorGlow.addColorStop(1,"rgba(100,30,120,0)");
-
-    ctx.globalAlpha=1;
-    ctx.fillStyle=floorGlow;
-    ctx.fillRect(
-        layout.cx-maxR,
-        floorY-maxR*.25,
-        maxR*2,
-        maxR*.5
-    );
-
-    const spokes=W<700?40:64;
+    const spokes=W<700?38:58;
 
     for(let i=0;i<spokes;i++){
-        const a=i/spokes*TAU;
+        const a=i/spokes*TAU+t*.025;
+        const x2=L.x+Math.cos(a)*maxR;
+        const y2=fy+Math.sin(a)*maxR*sy;
 
-        const x2=layout.cx+Math.cos(a)*maxR;
-        const y2=floorY+Math.sin(a)*maxR*sy;
-
-        const grad=ctx.createLinearGradient(
-            layout.cx,floorY,x2,y2
-        );
-
-        grad.addColorStop(0,"rgba(255,205,236,.24)");
-        grad.addColorStop(.23,"rgba(220,110,206,.11)");
-        grad.addColorStop(1,"rgba(130,57,150,0)");
+        const grad=ctx.createLinearGradient(L.x,fy,x2,y2);
+        grad.addColorStop(0,"rgba(255,210,238,.20)");
+        grad.addColorStop(.25,"rgba(219,101,203,.08)");
+        grad.addColorStop(1,"rgba(110,30,130,0)");
 
         ctx.globalAlpha=.22;
         ctx.strokeStyle=grad;
-        ctx.lineWidth=.45;
-
+        ctx.lineWidth=.42;
         ctx.beginPath();
-        ctx.moveTo(layout.cx,floorY);
+        ctx.moveTo(L.x,fy);
         ctx.lineTo(x2,y2);
         ctx.stroke();
     }
 
-    const ringCount=W<700?17:23;
+    const rings=W<700?17:24;
 
-    for(let ri=1;ri<=ringCount;ri++){
-        const q=ri/ringCount;
-        const base=maxR*Math.pow(q,1.43);
-        const steps=190;
-
+    for(let ri=1;ri<=rings;ri++){
+        const q=ri/rings;
+        const base=maxR*Math.pow(q,1.45);
         ctx.beginPath();
 
-        for(let i=0;i<=steps;i++){
-            const a=i/steps*TAU;
-
-            const petal=
+        for(let j=0;j<=180;j++){
+            const a=j/180*TAU;
+            const wave=
                 1+
-                (.105*(1-q)+.018)*
-                Math.sin(
-                    a*8-
-                    t*.42+
-                    ri*.37
-                );
+                (.115*(1-q)+.015)*
+                Math.sin(a*8-t*.72+ri*.45)+
+                .014*Math.sin(a*19+t*.31+ri);
 
-            const fine=
-                1+
-                .015*
-                Math.sin(
-                    a*19+
-                    t*.21+
-                    ri
-                );
+            const twist=.11*Math.sin(t*.24+q*4);
+            const aa=a+twist*(1-q);
 
-            const r=base*petal*fine;
+            const r=base*wave*(1+beat*.012*(1-q));
 
-            const x=layout.cx+Math.cos(a)*r;
-            const y=floorY+Math.sin(a)*r*sy;
+            const x=L.x+Math.cos(aa)*r;
+            const y=fy+Math.sin(aa)*r*sy;
 
-            if(i===0)ctx.moveTo(x,y);
+            if(j===0)ctx.moveTo(x,y);
             else ctx.lineTo(x,y);
         }
 
-        ctx.globalAlpha=.07+.23*(1-q);
-        ctx.strokeStyle=
-            ri<5
-                ?"rgba(255,225,243,1)"
-                :"rgba(212,118,211,1)";
-
-        ctx.lineWidth=ri<5?.85:.5;
+        ctx.globalAlpha=.065+.23*(1-q);
+        ctx.strokeStyle=ri<5?"#ffe5f5":"#cb6fc9";
+        ctx.lineWidth=ri<5?.82:.45;
         ctx.stroke();
     }
 
-    for(const d of floorDots){
+    for(const d of floorDust){
         const r=d.r*maxR;
+        const a=d.a+t*.018*(1-d.r);
+        const x=L.x+Math.cos(a)*r;
+        const y=fy+Math.sin(a)*r*sy;
 
-        const x=layout.cx+Math.cos(d.a)*r;
-        const y=floorY+Math.sin(d.a)*r*sy;
-
-        ctx.globalAlpha=d.alpha*(1-d.r*.7);
-        ctx.fillStyle="rgba(245,183,228,1)";
+        ctx.globalAlpha=d.alpha*(1-d.r*.72);
+        ctx.fillStyle="#efacd9";
         ctx.fillRect(x,y,d.size,d.size);
     }
 
     for(let i=0;i<6;i++){
-        const breathe=
+        const scale=
             1+
-            Math.sin(t*1.25-i*.62)*.035;
+            Math.sin(t*1.3-i*.55)*.04+
+            beat*.035;
 
-        const rx=(9+i*10)*breathe;
-        const ry=(2.0+i*1.9)*breathe;
+        const rx=(8+i*10)*scale;
+        const ry=(1.8+i*1.85)*scale;
 
-        ctx.globalAlpha=.34-i*.042;
-        ctx.strokeStyle=
-            i<2
-                ?"rgba(255,246,251,1)"
-                :"rgba(255,147,215,1)";
-
-        ctx.lineWidth=i<2?.95:.65;
+        ctx.globalAlpha=.33-i*.042;
+        ctx.strokeStyle=i<2?"#fff8fc":"#ed83c9";
+        ctx.lineWidth=i<2?.95:.62;
 
         ctx.beginPath();
-        ctx.ellipse(
-            layout.cx,
-            floorY,
-            rx,ry,
-            0,0,TAU
-        );
+        ctx.ellipse(L.x,fy,rx,ry,0,0,TAU);
         ctx.stroke();
     }
 
-    drawTipStream(t,tip.x,tip.y,floorY,layout.scale);
+    drawTipStream(t,tip.x,tip.y,fy,L.s);
 
     ctx.restore();
 }
 
-function drawTipStream(t,x,tipY,floorY,scale){
-    const gap=floorY-tipY;
-
+function drawTipStream(t,x,y1,y2,s){
+    const gap=y2-y1;
     if(gap<=0)return;
 
     ctx.save();
     ctx.globalCompositeOperation="lighter";
 
-    for(const p of streamDust){
-        const q=normU(p.q+t*.08);
+    for(const p of tipDust){
+        const q=norm(p.q+t*.10);
+        const mid=Math.sin(q*Math.PI);
 
-        const middle=Math.sin(q*Math.PI);
-
-        const y=tipY+gap*q;
-
-        const spread=
-            scale*.17*
-            middle;
+        const yy=y1+gap*q;
+        const width=s*(.025+.16*mid);
 
         const xx=
             x+
             Math.sin(
-                p.phase+
-                t*1.7+
-                q*13
-            )*
-            spread+
-            gaussian()*.08;
+                p.phase+t*2.15+q*14
+            )*width;
 
-        ctx.globalAlpha=
-            p.alpha*
-            middle;
+        ctx.globalAlpha=p.alpha*mid;
 
         if(p.size<1.5){
-            ctx.fillStyle="rgba(255,225,242,1)";
-            ctx.fillRect(xx,y,p.size,p.size);
+            ctx.fillStyle="#ffe4f4";
+            ctx.fillRect(xx,yy,p.size,p.size);
         }else{
-            const s=p.size;
-            ctx.drawImage(
-                glowWhite,
-                xx-s/2,
-                y-s/2,
-                s,s
-            );
+            const z=p.size;
+            ctx.drawImage(glowWhite,xx-z/2,yy-z/2,z,z);
         }
     }
 
     ctx.globalAlpha=.20;
-
     ctx.drawImage(
         glowWhite,
-        x-scale*.55,
-        floorY-scale*.55,
-        scale*1.1,
-        scale*1.1
+        x-s*.45,
+        y2-s*.45,
+        s*.9,
+        s*.9
     );
 
     ctx.restore();
 }
 
-function drawMist(layout){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-
-    const s=Math.min(W,H)*.42;
-
-    ctx.globalAlpha=.12;
-    ctx.drawImage(
-        glowSoft,
-        layout.cx-s/2,
-        layout.cy-s*.44,
-        s,s
-    );
-
-    ctx.restore();
-}
-
-function drawVignette(){
+function vignette(){
     ctx.save();
     ctx.globalCompositeOperation="source-over";
 
-    const r=Math.max(W,H)*.72;
-
     const g=ctx.createRadialGradient(
-        W*.5,H*.44,
-        Math.min(W,H)*.23,
-        W*.5,H*.44,
-        r
+        W*.5,H*.43,
+        Math.min(W,H)*.22,
+        W*.5,H*.43,
+        Math.max(W,H)*.72
     );
 
     g.addColorStop(0,"rgba(0,0,0,0)");
-    g.addColorStop(.62,"rgba(0,0,0,.025)");
-    g.addColorStop(1,"rgba(0,0,0,.58)");
+    g.addColorStop(.63,"rgba(0,0,0,.02)");
+    g.addColorStop(1,"rgba(0,0,0,.60)");
 
     ctx.fillStyle=g;
     ctx.fillRect(0,0,W,H);
@@ -1078,52 +829,53 @@ function drawVignette(){
 function animate(now){
     requestAnimationFrame(animate);
 
-    const dt=Math.min((now-lastTime)/1000,.033);
-    lastTime=now;
-
+    const dt=Math.min((now-last)/1000,.033);
+    last=now;
     const t=now*.001;
 
-    mouseX+=(targetMouseX-mouseX)*.025;
-    mouseY+=(targetMouseY-mouseY)*.025;
+    mx+=(tmx-mx)*.025;
+    my+=(tmy-my)*.025;
 
-    const layout=getLayout();
-    const pulse=heartbeat(t);
+    const L=layout();
+    const B=beatInfo(t);
 
-    drawBackground(t,layout);
-    drawMist(layout);
-    drawRays(t,layout,pulse);
-    drawFloor(t,layout,pulse);
-    drawDust(t,layout,pulse);
-    updateFlow(t,dt,layout,pulse);
-    drawRibbons(t,layout,pulse);
-    updateBursts(t,dt,layout,pulse);
-    drawVignette();
+    background(t,L);
+    drawMist(L,t);
+    drawFloor(t,L,B.pulse,B.b);
+    drawInner(t,L,B.pulse);
+    drawFlow(t,dt,L,B.pulse);
+    drawRibbons(t,L,B.pulse);
+    updateComets(t,dt,L,B.pulse,B.b);
 
-    firstFrame=false;
+    const high=B.b>.72;
+    if(high&&!beatWasHigh)spawnBeatBurst(t,L,B.pulse);
+    beatWasHigh=high;
+
+    updateSparks(t,dt,L);
+    vignette();
+
+    first=false;
 }
 
 addEventListener("pointermove",e=>{
-    targetMouseX=(e.clientX/W-.5)*2;
-    targetMouseY=(e.clientY/H-.5)*2;
+    tmx=(e.clientX/W-.5)*2;
+    tmy=(e.clientY/H-.5)*2;
 },{passive:true});
 
 addEventListener("pointerleave",()=>{
-    targetMouseX=0;
-    targetMouseY=0;
+    tmx=0;tmy=0;
 },{passive:true});
 
-let resizeTimer=null;
-
+let timer;
 addEventListener("resize",()=>{
-    clearTimeout(resizeTimer);
-    resizeTimer=setTimeout(resize,120);
+    clearTimeout(timer);
+    timer=setTimeout(resize,120);
 },{passive:true});
 
 buildCurve();
-createSprites();
+makeSprites();
 resize();
 requestAnimationFrame(animate);
-
 })();
 </script>
 </body>
