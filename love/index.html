@@ -1,0 +1,1078 @@
+---
+layout: false
+permalink: /love/
+---
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Love</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 50% 42%, rgba(88, 30, 86, 0.36), transparent 38%),
+        radial-gradient(circle at 50% 70%, rgba(48, 25, 82, 0.25), transparent 45%),
+        #070611;
+}
+body {
+    font-family: Arial, sans-serif;
+}
+#heartCanvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+.back {
+    position: fixed;
+    top: 24px;
+    left: 26px;
+    z-index: 10;
+    color: rgba(255,255,255,.55);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 1px;
+    transition: .3s;
+}
+.back:hover {
+    color: #ffc4e7;
+    text-shadow: 0 0 12px rgba(255,150,215,.7);
+}
+.tip {
+    position: fixed;
+    left: 50%;
+    bottom: 25px;
+    transform: translateX(-50%);
+    z-index: 10;
+    color: rgba(255,220,240,.35);
+    font-size: 12px;
+    letter-spacing: 2px;
+    pointer-events: none;
+}
+@media(max-width:768px) {
+    .back {
+        top: 18px;
+        left: 18px;
+    }
+    .tip {
+        bottom: 18px;
+        font-size: 10px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<a class="back" href="/">← HOME</a>
+
+<canvas id="heartCanvas"></canvas>
+
+<div class="tip">LOVE IS THE LIGHT</div>
+
+<script>
+(function() {
+    "use strict";
+
+    const canvas = document.getElementById("heartCanvas");
+    const ctx = canvas.getContext("2d");
+
+    let W = 0;
+    let H = 0;
+    let DPR = 1;
+
+    let particles = [];
+    let rays = [];
+    let stars = [];
+
+    let mouseX = 0;
+    let mouseY = 0;
+    let targetMouseX = 0;
+    let targetMouseY = 0;
+
+    const CONFIG = {
+        desktopParticles: 1800,
+        mobileParticles: 900,
+        desktopRays: 180,
+        mobileRays: 90,
+        heartWidth: 380,
+        heartbeat: 0.065,
+        spring: 0.055
+    };
+
+    function rand(min, max) {
+        return Math.random() * (max - min) + min;
+    }
+
+    function heartPoint(t) {
+        const x = 16 * Math.pow(Math.sin(t), 3);
+
+        const y =
+            13 * Math.cos(t) -
+            5 * Math.cos(2 * t) -
+            2 * Math.cos(3 * t) -
+            Math.cos(4 * t);
+
+        return {
+            x: x,
+            y: -y
+        };
+    }
+
+    class HeartParticle {
+        constructor() {
+            this.init();
+        }
+
+        init() {
+            this.angle = rand(0, Math.PI * 2);
+
+            const hp = heartPoint(this.angle);
+
+            if (Math.random() < 0.48) {
+                this.radius = rand(0.91, 1.07);
+            } else {
+                this.radius = Math.pow(Math.random(), 0.23);
+                this.radius = 0.12 + this.radius * 0.88;
+            }
+
+            this.hx = hp.x * this.radius;
+            this.hy = hp.y * this.radius;
+
+            this.depth = rand(0.78, 1.25);
+
+            this.phase = rand(0, Math.PI * 2);
+            this.speed = rand(0.5, 1.8);
+
+            this.size = rand(0.5, 2.2);
+
+            const r = Math.random();
+
+            if (r < 0.50) {
+                this.rgb = "255,218,240";
+            } else if (r < 0.80) {
+                this.rgb = "255,145,207";
+            } else if (r < 0.94) {
+                this.rgb = "222,143,255";
+            } else {
+                this.rgb = "255,255,255";
+            }
+
+            this.alpha = rand(0.45, 0.95);
+            this.twinkle = rand(0.7, 2.5);
+
+            const direction = rand(0, Math.PI * 2);
+            const distance = rand(80, Math.max(W, H) * 0.52);
+
+            this.x =
+                W / 2 +
+                Math.cos(direction) * distance;
+
+            this.y =
+                H * 0.43 +
+                Math.sin(direction) * distance;
+
+            this.oldX = this.x;
+            this.oldY = this.y;
+        }
+
+        update(time, scale, cx, cy) {
+            this.oldX = this.x;
+            this.oldY = this.y;
+
+            const floatingX =
+                Math.sin(time * 0.0014 * this.speed + this.phase)
+                * 2.6
+                * this.depth;
+
+            const floatingY =
+                Math.cos(time * 0.0011 * this.speed + this.phase)
+                * 2.1
+                * this.depth;
+
+            const tinyPulse =
+                1 +
+                Math.sin(time * 0.002 + this.phase) * 0.012;
+
+            const tx =
+                cx +
+                this.hx *
+                scale *
+                this.depth *
+                tinyPulse +
+                floatingX;
+
+            const ty =
+                cy +
+                this.hy *
+                scale *
+                this.depth *
+                tinyPulse +
+                floatingY;
+
+            this.x += (tx - this.x) * CONFIG.spring;
+            this.y += (ty - this.y) * CONFIG.spring;
+        }
+
+        draw(time) {
+            const flicker =
+                0.65 +
+                Math.sin(
+                    time * 0.004 * this.twinkle +
+                    this.phase
+                ) * 0.35;
+
+            const size =
+                Math.max(
+                    0.35,
+                    this.size *
+                    this.depth *
+                    flicker
+                );
+
+            ctx.globalAlpha =
+                0.18 *
+                this.alpha *
+                flicker;
+
+            ctx.strokeStyle =
+                "rgba(" +
+                this.rgb +
+                ",1)";
+
+            ctx.lineWidth =
+                Math.max(
+                    0.3,
+                    size * 0.42
+                );
+
+            ctx.beginPath();
+            ctx.moveTo(this.oldX, this.oldY);
+            ctx.lineTo(this.x, this.y);
+            ctx.stroke();
+
+            ctx.globalAlpha =
+                this.alpha *
+                flicker;
+
+            ctx.fillStyle =
+                "rgba(" +
+                this.rgb +
+                ",1)";
+
+            ctx.beginPath();
+            ctx.arc(
+                this.x,
+                this.y,
+                size,
+                0,
+                Math.PI * 2
+            );
+            ctx.fill();
+
+            if (size > 1.45) {
+                ctx.globalAlpha =
+                    0.12 *
+                    flicker;
+
+                ctx.beginPath();
+
+                ctx.arc(
+                    this.x,
+                    this.y,
+                    size * 4,
+                    0,
+                    Math.PI * 2
+                );
+
+                ctx.fill();
+            }
+        }
+    }
+
+    class Ray {
+        constructor() {
+            this.reset(true);
+        }
+
+        reset(first) {
+            this.angle =
+                rand(0, Math.PI * 2);
+
+            this.distance =
+                first
+                    ? rand(130, 480)
+                    : rand(135, 190);
+
+            this.length =
+                rand(5, 42);
+
+            this.speed =
+                rand(0.35, 1.5);
+
+            this.alpha =
+                rand(0.05, 0.35);
+
+            this.width =
+                rand(0.3, 1.2);
+
+            this.phase =
+                rand(0, Math.PI * 2);
+        }
+
+        update() {
+            this.distance += this.speed;
+
+            if (
+                this.distance >
+                Math.max(W, H) * 0.72
+            ) {
+                this.reset(false);
+            }
+        }
+
+        draw(time, cx, cy) {
+            const flicker =
+                0.4 +
+                Math.abs(
+                    Math.sin(
+                        time * 0.002 +
+                        this.phase
+                    )
+                ) * 0.6;
+
+            const squash = 0.88;
+
+            const x1 =
+                cx +
+                Math.cos(this.angle) *
+                this.distance;
+
+            const y1 =
+                cy +
+                Math.sin(this.angle) *
+                this.distance *
+                squash;
+
+            const x2 =
+                cx +
+                Math.cos(this.angle) *
+                (this.distance + this.length);
+
+            const y2 =
+                cy +
+                Math.sin(this.angle) *
+                (this.distance + this.length) *
+                squash;
+
+            ctx.globalAlpha =
+                this.alpha *
+                flicker;
+
+            ctx.strokeStyle =
+                "rgba(255,168,222,1)";
+
+            ctx.lineWidth =
+                this.width;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+    }
+
+    class Star {
+        constructor() {
+            this.reset();
+        }
+
+        reset() {
+            this.x = rand(0, W);
+            this.y = rand(0, H);
+
+            this.size =
+                rand(0.25, 1.35);
+
+            this.alpha =
+                rand(0.08, 0.65);
+
+            this.phase =
+                rand(0, Math.PI * 2);
+
+            this.speed =
+                rand(0.5, 2);
+        }
+
+        draw(time) {
+            const glow =
+                0.45 +
+                Math.sin(
+                    time * 0.0015 *
+                    this.speed +
+                    this.phase
+                ) * 0.4;
+
+            ctx.globalAlpha =
+                this.alpha *
+                glow;
+
+            ctx.fillStyle =
+                "rgba(255,205,240,1)";
+
+            ctx.beginPath();
+            ctx.arc(
+                this.x,
+                this.y,
+                this.size,
+                0,
+                Math.PI * 2
+            );
+            ctx.fill();
+        }
+    }
+
+    function drawAura(cx, cy, scale) {
+        const gradient =
+            ctx.createRadialGradient(
+                cx,
+                cy,
+                scale * 3,
+                cx,
+                cy,
+                scale * 25
+            );
+
+        gradient.addColorStop(
+            0,
+            "rgba(255,180,225,0.11)"
+        );
+
+        gradient.addColorStop(
+            0.35,
+            "rgba(255,112,199,0.06)"
+        );
+
+        gradient.addColorStop(
+            0.67,
+            "rgba(189,105,255,0.028)"
+        );
+
+        gradient.addColorStop(
+            1,
+            "rgba(100,50,180,0)"
+        );
+
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = gradient;
+
+        ctx.beginPath();
+
+        ctx.arc(
+            cx,
+            cy,
+            scale * 25,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+    }
+
+    function drawHeartOutline(time, cx, cy, scale, heartbeat) {
+        ctx.save();
+
+        ctx.globalCompositeOperation = "lighter";
+
+        for (let k = 0; k < 3; k++) {
+            ctx.beginPath();
+
+            const steps = 240;
+
+            for (let i = 0; i <= steps; i++) {
+                const t =
+                    i / steps *
+                    Math.PI *
+                    2;
+
+                const hp =
+                    heartPoint(t);
+
+                const jitter =
+                    Math.sin(
+                        t * 17 +
+                        time * 0.0012 +
+                        k
+                    ) *
+                    (0.02 + k * 0.008);
+
+                const s =
+                    scale *
+                    heartbeat *
+                    (1 + jitter) *
+                    (1 + k * 0.012);
+
+                const x =
+                    cx +
+                    hp.x * s;
+
+                const y =
+                    cy +
+                    hp.y * s;
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+
+            ctx.closePath();
+
+            ctx.strokeStyle =
+                k === 0
+                    ? "rgba(255,225,245,.32)"
+                    : "rgba(255,125,205,.13)";
+
+            ctx.lineWidth =
+                k === 0
+                    ? 0.75
+                    : 1.4 + k;
+
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    function drawGround(time, cx, cy, scale) {
+        const baseY =
+            cy +
+            scale * 18.5;
+
+        ctx.save();
+
+        ctx.globalCompositeOperation =
+            "lighter";
+
+        /*
+         * 心形下方中央发光点
+         */
+        const glow =
+            ctx.createRadialGradient(
+                cx,
+                baseY,
+                0,
+                cx,
+                baseY,
+                75
+            );
+
+        glow.addColorStop(
+            0,
+            "rgba(255,230,248,.3)"
+        );
+
+        glow.addColorStop(
+            .25,
+            "rgba(255,132,213,.12)"
+        );
+
+        glow.addColorStop(
+            1,
+            "rgba(176,100,255,0)"
+        );
+
+        ctx.fillStyle = glow;
+        ctx.globalAlpha = 1;
+
+        ctx.beginPath();
+
+        ctx.ellipse(
+            cx,
+            baseY,
+            90,
+            20,
+            0,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+
+        /*
+         * 中央三个光环
+         */
+        for (let i = 0; i < 4; i++) {
+            const pulse =
+                1 +
+                Math.sin(
+                    time * 0.002 +
+                    i * 0.8
+                ) * 0.08;
+
+            ctx.globalAlpha =
+                0.28 -
+                i * 0.05;
+
+            ctx.strokeStyle =
+                "rgba(255,205,240,1)";
+
+            ctx.lineWidth = 1;
+
+            ctx.beginPath();
+
+            ctx.ellipse(
+                cx,
+                baseY + i,
+                (17 + i * 13) *
+                pulse,
+                (4 + i * 2.4) *
+                pulse,
+                0,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.stroke();
+        }
+
+        /*
+         * 透视圆形网格
+         */
+        for (let i = 0; i < 16; i++) {
+            const radius =
+                28 +
+                i * 25;
+
+            const wave =
+                Math.sin(
+                    time * 0.0015 -
+                    i * 0.45
+                ) * 2;
+
+            ctx.globalAlpha =
+                Math.max(
+                    0.018,
+                    0.17 -
+                    i * 0.009
+                );
+
+            ctx.strokeStyle =
+                i % 2
+                    ? "rgba(217,160,255,1)"
+                    : "rgba(255,190,232,1)";
+
+            ctx.lineWidth =
+                0.6;
+
+            ctx.setLineDash([
+                1.2,
+                5
+            ]);
+
+            ctx.beginPath();
+
+            ctx.ellipse(
+                cx,
+                baseY + i * 1.35,
+                radius + wave,
+                radius * 0.19,
+                0,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+
+        /*
+         * 向外发散的地面线
+         */
+        const lines = 36;
+
+        for (
+            let i = 0;
+            i < lines;
+            i++
+        ) {
+            const a =
+                i / lines *
+                Math.PI *
+                2;
+
+            const radius = 430;
+
+            const x =
+                cx +
+                Math.cos(a) *
+                radius;
+
+            const y =
+                baseY +
+                Math.sin(a) *
+                radius *
+                0.18;
+
+            ctx.globalAlpha =
+                0.055;
+
+            ctx.strokeStyle =
+                "rgba(225,175,255,1)";
+
+            ctx.lineWidth =
+                0.55;
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                cx,
+                baseY
+            );
+
+            ctx.lineTo(
+                x,
+                y
+            );
+
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    function createScene() {
+        particles = [];
+        rays = [];
+        stars = [];
+
+        const mobile =
+            W <= 768;
+
+        const particleCount =
+            mobile
+                ? CONFIG.mobileParticles
+                : CONFIG.desktopParticles;
+
+        const rayCount =
+            mobile
+                ? CONFIG.mobileRays
+                : CONFIG.desktopRays;
+
+        const starCount =
+            mobile
+                ? 110
+                : 230;
+
+        for (
+            let i = 0;
+            i < particleCount;
+            i++
+        ) {
+            particles.push(
+                new HeartParticle()
+            );
+        }
+
+        for (
+            let i = 0;
+            i < rayCount;
+            i++
+        ) {
+            rays.push(
+                new Ray()
+            );
+        }
+
+        for (
+            let i = 0;
+            i < starCount;
+            i++
+        ) {
+            stars.push(
+                new Star()
+            );
+        }
+    }
+
+    function resize() {
+        W =
+            window.innerWidth;
+
+        H =
+            window.innerHeight;
+
+        DPR =
+            Math.min(
+                window.devicePixelRatio ||
+                1,
+                1.6
+            );
+
+        canvas.width =
+            Math.floor(
+                W * DPR
+            );
+
+        canvas.height =
+            Math.floor(
+                H * DPR
+            );
+
+        canvas.style.width =
+            W + "px";
+
+        canvas.style.height =
+            H + "px";
+
+        ctx.setTransform(
+            DPR,
+            0,
+            0,
+            DPR,
+            0,
+            0
+        );
+
+        createScene();
+    }
+
+    function animate(time) {
+        ctx.clearRect(
+            0,
+            0,
+            W,
+            H
+        );
+
+        mouseX +=
+            (targetMouseX -
+            mouseX) *
+            0.035;
+
+        mouseY +=
+            (targetMouseY -
+            mouseY) *
+            0.035;
+
+        let cx =
+            W * 0.5 +
+            mouseX * 13;
+
+        let cy =
+            H * 0.405 +
+            mouseY * 8;
+
+        const targetWidth =
+            W < 768
+                ? Math.min(
+                    W * 0.68,
+                    310
+                )
+                : Math.min(
+                    CONFIG.heartWidth,
+                    H * 0.47
+                );
+
+        const scale =
+            targetWidth / 32;
+
+        /*
+         * 双脉冲心跳
+         */
+        const beatTime =
+            (time * 0.00115) %
+            1;
+
+        let beat = 0;
+
+        if (
+            beatTime > 0.02 &&
+            beatTime < 0.14
+        ) {
+            const t =
+                (beatTime - 0.02) /
+                0.12;
+
+            beat +=
+                Math.sin(
+                    t *
+                    Math.PI
+                );
+        }
+
+        if (
+            beatTime > 0.20 &&
+            beatTime < 0.34
+        ) {
+            const t =
+                (beatTime - 0.20) /
+                0.14;
+
+            beat +=
+                0.58 *
+                Math.sin(
+                    t *
+                    Math.PI
+                );
+        }
+
+        const slowBreath =
+            Math.sin(
+                time * 0.0013
+            ) *
+            0.012;
+
+        const heartbeat =
+            1 +
+            beat *
+            CONFIG.heartbeat +
+            slowBreath;
+
+        ctx.save();
+
+        ctx.globalCompositeOperation =
+            "lighter";
+
+        for (
+            let i = 0;
+            i < stars.length;
+            i++
+        ) {
+            stars[i].draw(time);
+        }
+
+        drawAura(
+            cx,
+            cy,
+            scale
+        );
+
+        for (
+            let i = 0;
+            i < rays.length;
+            i++
+        ) {
+            rays[i].update();
+
+            rays[i].draw(
+                time,
+                cx,
+                cy
+            );
+        }
+
+        drawHeartOutline(
+            time,
+            cx,
+            cy,
+            scale,
+            heartbeat
+        );
+
+        for (
+            let i = 0;
+            i < particles.length;
+            i++
+        ) {
+            particles[i].update(
+                time,
+                scale *
+                heartbeat,
+                cx,
+                cy
+            );
+
+            particles[i].draw(
+                time
+            );
+        }
+
+        drawGround(
+            time,
+            cx,
+            cy,
+            scale
+        );
+
+        ctx.restore();
+
+        ctx.globalAlpha = 1;
+
+        ctx.globalCompositeOperation =
+            "source-over";
+
+        requestAnimationFrame(
+            animate
+        );
+    }
+
+    window.addEventListener(
+        "pointermove",
+        function(e) {
+            targetMouseX =
+                (
+                    e.clientX /
+                    W -
+                    0.5
+                ) * 2;
+
+            targetMouseY =
+                (
+                    e.clientY /
+                    H -
+                    0.5
+                ) * 2;
+        },
+        {
+            passive: true
+        }
+    );
+
+    window.addEventListener(
+        "pointerleave",
+        function() {
+            targetMouseX = 0;
+            targetMouseY = 0;
+        }
+    );
+
+    let resizeTimer = null;
+
+    window.addEventListener(
+        "resize",
+        function() {
+            clearTimeout(
+                resizeTimer
+            );
+
+            resizeTimer =
+                setTimeout(
+                    resize,
+                    150
+                );
+        }
+    );
+
+    resize();
+
+    requestAnimationFrame(
+        animate
+    );
+})();
+</script>
+
+</body>
+</html>
