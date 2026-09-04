@@ -1,359 +1,1157 @@
-<!DOCTYPE html>
+```html
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050914">
 <title>Love</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#030106}
-canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
-.home{
-    position:fixed;left:22px;top:20px;z-index:10;
-    color:rgba(255,240,248,.28);text-decoration:none;
-    font:10px Arial,sans-serif;letter-spacing:3px;transition:.3s
-}
-.home:hover{color:#fff;text-shadow:0 0 10px #ff8fc9}
+html,body{width:100%;height:100%;overflow:hidden;background:#03060d}
+body{overscroll-behavior:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
 </style>
 </head>
-
 <body>
-<a class="home" href="/">HOME</a>
-<canvas id="heart"></canvas>
+<body>
+<canvas id="love" aria-hidden="true"></canvas>
 
 <script>
 (()=>{
 "use strict";
 
-const canvas=document.getElementById("heart");
-const ctx=canvas.getContext("2d",{alpha:false});
+const canvas=document.getElementById("love");
+const ctx=canvas.getContext("2d",{alpha:false,desynchronized:true});
 
 const TAU=Math.PI*2;
+const LUT_SIZE=2048;
 
-let W=0;
-let H=0;
-let DPR=1;
+let W=0,H=0,DPR=1;
+let centerX=0,floorY=0,heartUnit=1,floorRadius=1;
+let bgGradient=null,vignetteGradient=null;
+let glowPink=null,glowWhite=null;
+let lastProfile="";
+let startTime=performance.now();
 
-let heartScale=1;
-let centerX=0;
-let centerY=0;
-let floorY=0;
-
-let particles=[];
-let targets=[];
-let emitters=[];
-let stars=[];
+let core=[];
+let shell=[];
+let inside=[];
+let dust=[];
 let floorDots=[];
+let rays=[];
+let debris=[];
+let stars=[];
+let stem=[];
 
-let lastTime=performance.now();
-let resizeTimer=null;
+const curveX=new Float32Array(LUT_SIZE);
+const curveY=new Float32Array(LUT_SIZE);
+const curveNX=new Float32Array(LUT_SIZE);
+const curveNY=new Float32Array(LUT_SIZE);
 
-const MOBILE=()=>innerWidth<720;
+const curveSample={x:0,y:0,nx:0,ny:0};
+const projected={x:0,y:0,k:1,z:0};
+const floorProjected={x:0,y:0,z:0};
 
-const CONFIG={
-    traceLengthDesktop:32,
-    traceLengthMobile:20,
-    heartParticleDesktop:1650,
-    heartParticleMobile:800,
-    emitterDesktop:520,
-    emitterMobile:260
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const mix=(a,b,t)=>a+(b-a)*t;
+const fract=v=>v-Math.floor(v);
+const smooth=v=>{
+    v=clamp(v);
+    return v*v*(3-2*v);
+};
+const smoother=v=>{
+    v=clamp(v);
+    return v*v*v*(v*(v*6-15)+10);
 };
 
-const rand=(a,b)=>a+Math.random()*(b-a);
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-
-/* =========================================================
-   Heart
-========================================================= */
-
-function heartPoint(t){
-    return {
-        x:16*Math.pow(Math.sin(t),3),
-        y:-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))
+function mulberry32(seed){
+    return function(){
+        seed|=0;
+        seed=seed+0x6D2B79F5|0;
+        let t=Math.imul(seed^seed>>>15,1|seed);
+        t=t+Math.imul(t^t>>>7,61|t)^t;
+        return((t^t>>>14)>>>0)/4294967296;
     };
 }
 
-/*
- * 比仓库 love6 原本只用 3 层更密。
- *
- * 多层轮廓叠起来之后，
- * 中心不是空心，而是有明显体积感。
- */
-const HEART_LAYERS=[
-    {r:1.000,density:1.00},
-    {r:.955,density:.95},
-    {r:.905,density:.90},
-    {r:.845,density:.86},
-    {r:.775,density:.80},
-    {r:.695,density:.72},
-    {r:.605,density:.64},
-    {r:.505,density:.54},
-    {r:.395,density:.44},
-    {r:.285,density:.34}
-];
+let random=mulberry32(0x5f3759df);
 
-function buildTargets(){
-    targets=[];
+const rnd=(a=1,b)=>{
+    if(b===undefined){
+        b=a;
+        a=0;
+    }
+    return a+(b-a)*random();
+};
 
-    const step=MOBILE()?.032:.020;
+const gaussian=()=>random()+random()+random()+random()-2;
 
-    HEART_LAYERS.forEach((layer,layerId)=>{
-        for(let t=0;t<TAU;t+=step/layer.density){
-            const p=heartPoint(t);
+function heartPoint(t){
+    const s=Math.sin(t);
+    const y=
+        13*Math.cos(t)
+        -5*Math.cos(2*t)
+        -2*Math.cos(3*t)
+        -Math.cos(4*t);
 
-            /*
-             * 内层稍微进行非线性收缩，
-             * 避免只是十个机械的同心心形。
-             */
-            const wobble=
-                1+
-                Math.sin(t*7+layerId*.71)*(.007*(1-layer.r))+
-                Math.sin(t*13-layerId*.37)*(.004*(1-layer.r));
-
-            targets.push({
-                x:centerX+p.x*heartScale*layer.r*wobble,
-                y:centerY+p.y*heartScale*layer.r*wobble,
-                layer:layerId,
-                radial:layer.r
-            });
-        }
-    });
+    return[
+        0.97*s*s*s,
+        (y+2.5)/14.5
+    ];
 }
 
-/* =========================================================
-   Flow particles
-   核心参考 love6：
-   q / D / velocity / force / trace
-========================================================= */
+function buildCurve(){
+    for(let i=0;i<LUT_SIZE;i++){
+        const p=heartPoint(i/LUT_SIZE*TAU);
+        curveX[i]=p[0];
+        curveY[i]=p[1];
+    }
 
-function buildFlowParticles(){
-    particles=[];
+    for(let i=0;i<LUT_SIZE;i++){
+        const a=(i-2+LUT_SIZE)%LUT_SIZE;
+        const b=(i+2)%LUT_SIZE;
 
-    const count=MOBILE()
-        ?CONFIG.heartParticleMobile
-        :CONFIG.heartParticleDesktop;
+        const dx=curveX[b]-curveX[a];
+        const dy=curveY[b]-curveY[a];
+        const length=Math.hypot(dx,dy)||1;
 
-    const traceLength=MOBILE()
-        ?CONFIG.traceLengthMobile
-        :CONFIG.traceLengthDesktop;
+        curveNX[i]=-dy/length;
+        curveNY[i]=dx/length;
+    }
+}
 
-    for(let i=0;i<count;i++){
-        const q=(Math.random()*targets.length)|0;
-        const target=targets[q];
+function sampleCurve(u){
+    const f=fract(u)*LUT_SIZE;
+    const i=f|0;
+    const j=(i+1)%LUT_SIZE;
+    const q=f-i;
 
-        /*
-         * 不像原实现一样从全屏随机飞过来。
-         * 初始化就在心形附近，页面一打开就是完整心形。
-         */
-        const x=target.x+rand(-30,30);
-        const y=target.y+rand(-30,30);
+    curveSample.x=mix(curveX[i],curveX[j],q);
+    curveSample.y=mix(curveY[i],curveY[j],q);
+    curveSample.nx=mix(curveNX[i],curveNX[j],q);
+    curveSample.ny=mix(curveNY[i],curveNY[j],q);
 
-        const trace=[];
+    return curveSample;
+}
 
-        for(let k=0;k<traceLength;k++){
-            trace.push({
-                x:x+rand(-2,2),
-                y:y+rand(-2,2)
+function makeGlow(size,inner,mid){
+    const c=document.createElement("canvas");
+    c.width=c.height=size;
+
+    const g=c.getContext("2d");
+    const r=size/2;
+    const gradient=g.createRadialGradient(r,r,0,r,r,r);
+
+    gradient.addColorStop(0,"rgba(255,255,255,1)");
+    gradient.addColorStop(.10,inner);
+    gradient.addColorStop(.34,mid);
+    gradient.addColorStop(1,"rgba(255,105,183,0)");
+
+    g.fillStyle=gradient;
+    g.fillRect(0,0,size,size);
+
+    return c;
+}
+
+function pointBase(u,offset,z,size,alpha,hot,flow){
+    return{
+        u,
+        offset,
+        z,
+        size,
+        alpha,
+        hot,
+        flow,
+        phase:rnd(TAU),
+        twinkle:rnd(1.8,5.2),
+        wobble:rnd(.002,.013),
+        zWobble:rnd(.002,.018),
+        burst:rnd(.2,1)
+    };
+}
+
+function buildHeart(profile){
+    random=mulberry32(0x5f3759df);
+
+    const mobile=profile==="mobile";
+    const count={
+        core:mobile?900:1550,
+        shell:mobile?3200:5400,
+        inside:mobile?1250:2250,
+        dust:mobile?620:1150
+    };
+
+    core=[];
+    shell=[];
+    inside=[];
+    dust=[];
+
+    for(let i=0;i<count.core;i++){
+        const u=(i+rnd(-.38,.38))/count.core;
+        const ring=rnd(.004,.034);
+        const a=rnd(TAU);
+
+        core.push(pointBase(
+            u,
+            Math.cos(a)*ring+gaussian()*.006,
+            Math.sin(a)*ring*1.3+gaussian()*.008,
+            rnd(.75,1.9),
+            rnd(.62,.96),
+            random()<.20,
+            rnd(.0015,.0055)
+        ));
+    }
+
+    for(let i=0;i<count.shell;i++){
+        const tube=Math.abs(gaussian())*rnd(.035,.105);
+        const a=rnd(TAU);
+
+        let offset=Math.cos(a)*tube+gaussian()*.022;
+
+        if(random()<.17){
+            offset+=
+                Math.sign(gaussian()||1)
+                *rnd(.05,.18)
+                *Math.pow(random(),1.8);
+        }
+
+        shell.push(pointBase(
+            random(),
+            offset,
+            Math.sin(a)*tube*1.5+gaussian()*.038,
+            random()<.09?rnd(2,3.25):rnd(.65,2.15),
+            rnd(.30,.76),
+            random()<.095,
+            rnd(.002,.010)
+        ));
+    }
+
+    for(let i=0;i<count.inside;i++){
+        const radius=.10+.80*Math.pow(random(),.34);
+
+        const p=pointBase(
+            random(),
+            gaussian()*.018,
+            gaussian()*(.035+.10*(1-radius)),
+            random()<.06?rnd(1.8,2.55):rnd(.55,1.65),
+            rnd(.20,.62),
+            random()<.075,
+            rnd(-.008,.008)
+        );
+
+        p.radius=radius;
+        p.jx=gaussian()*.15*(1-radius);
+        p.jy=gaussian()*.12*(1-radius);
+
+        inside.push(p);
+    }
+
+    for(let i=0;i<count.dust;i++){
+        const side=Math.sign(gaussian()||1);
+
+        const p=pointBase(
+            random(),
+            gaussian()*.12+
+            side*rnd(.055,.23)*Math.pow(random(),.72),
+            gaussian()*.15,
+            rnd(.45,1.45),
+            rnd(.10,.38),
+            random()<.045,
+            rnd(-.012,.014)
+        );
+
+        p.wobble=rnd(.008,.035);
+        dust.push(p);
+    }
+}
+
+function buildFloor(){
+    floorDots=[];
+
+    for(let ringIndex=0;ringIndex<10;ringIndex++){
+        const r=.10+ringIndex*.092;
+        const count=50+ringIndex*14;
+
+        for(let i=0;i<count;i++){
+            const a=i/count*TAU+rnd(-.008,.008);
+
+            floorDots.push({
+                x:Math.cos(a)*r,
+                z:Math.sin(a)*r,
+                size:rnd(.55,1.18),
+                alpha:rnd(.20,.56),
+                phase:rnd(TAU)
             });
         }
+    }
 
-        const brightness=Math.random();
+    for(let spokeIndex=0;spokeIndex<58;spokeIndex++){
+        const a=spokeIndex/58*TAU;
 
-        let color;
+        for(let i=2;i<24;i++){
+            const r=i/24+rnd(-.008,.008);
 
-        /*
-         * 目标颜色：
-         * 白 → 很浅的樱花粉 → 淡粉
-         *
-         * 不再使用紫色主体。
-         */
-        if(brightness>.93){
-            color={
-                r:255,
-                g:247,
-                b:251,
-                a:rand(.55,.88)
-            };
-        }else if(brightness>.55){
-            color={
-                r:255,
-                g:187+rand(0,35),
-                b:218+rand(0,25),
-                a:rand(.32,.66)
-            };
-        }else{
-            color={
-                r:246+rand(0,9),
-                g:135+rand(0,45),
-                b:194+rand(0,30),
-                a:rand(.16,.42)
-            };
+            floorDots.push({
+                x:Math.cos(a)*r,
+                z:Math.sin(a)*r,
+                size:rnd(.52,1.12),
+                alpha:rnd(.18,.48),
+                phase:rnd(TAU)
+            });
         }
+    }
 
-        particles.push({
-            vx:0,
-            vy:0,
+    for(let i=0;i<1050;i++){
+        const a=i/1050*TAU;
+        const wave=Math.sin(18*a);
+        const r=Math.sign(wave)*Math.pow(Math.abs(wave),.72);
 
-            /*
-             * 当前目标点
-             */
-            q,
-
-            /*
-             * 沿心形顺/逆方向走
-             */
-            direction:Math.random()<.5?-1:1,
-
-            /*
-             * love6 使用 rand()+5，
-             * 这里稍微降低并增加随机层次。
-             */
-            speed:rand(.65,2.05),
-
-            /*
-             * 速度阻尼
-             */
-            force:rand(.76,.91),
-
-            trace,
-
-            color,
-
-            size:
-                brightness>.96
-                    ?rand(1.25,1.9)
-                    :rand(.55,1.15),
-
-            changeChance:rand(.001,.0045),
-
-            /*
-             * 不同粒子跳 target 的跨度不同，
-             * 能看到较明显的沿心运动。
-             */
-            step:
-                Math.random()<.82
-                    ?1
-                    :Math.random()<.95
-                    ?2
-                    :3
+        floorDots.push({
+            x:Math.cos(a)*r,
+            z:Math.sin(a)*r,
+            size:rnd(.55,1.22),
+            alpha:rnd(.28,.65),
+            phase:rnd(TAU)
         });
     }
 }
 
-function updateFlow(dt){
-    const dtScale=Math.min(2,dt*60);
+function buildEffects(profile){
+    const mobile=profile==="mobile";
 
-    for(const p of particles){
-        const head=p.trace[0];
-        const target=targets[p.q];
+    rays=[];
+    debris=[];
+    stem=[];
 
-        const dx=head.x-target.x;
-        const dy=head.y-target.y;
-        const distance=Math.sqrt(dx*dx+dy*dy)||1;
+    const rayCount=mobile?95:170;
 
-        /*
-         * 到达当前目标点后继续沿目标曲线前进。
-         * 这是 love6 动画“活”的核心。
-         */
-        if(distance<5.5){
-            if(Math.random()<p.changeChance){
-                p.q=(Math.random()*targets.length)|0;
-            }else{
-                if(Math.random()<.003){
-                    p.direction*=-1;
-                }
+    for(let i=0;i<rayCount;i++){
+        rays.push({
+            angle:i/rayCount*TAU+rnd(-.045,.045),
+            length:rnd(.70,1.95)*Math.pow(rnd(.35,1),.38),
+            start:rnd(.04,.30),
+            width:random()<.14?rnd(1.2,2.2):rnd(.35,1.05),
+            alpha:rnd(.18,.78),
+            delay:rnd(0,.22),
+            phase:rnd(TAU)
+        });
+    }
 
-                p.q+=p.direction*p.step;
+    const debrisCount=mobile?520:1050;
 
-                if(p.q>=targets.length)p.q-=targets.length;
-                if(p.q<0)p.q+=targets.length;
-            }
-        }
+    for(let i=0;i<debrisCount;i++){
+        debris.push({
+            angle:rnd(TAU),
+            speed:rnd(.45,1.75)*Math.pow(rnd(.2,1),.35),
+            start:rnd(.05,.46),
+            delay:rnd(0,.22),
+            curve:rnd(-.25,.25),
+            size:random()<.08?rnd(1.8,3.1):rnd(.5,1.55),
+            alpha:rnd(.18,.72),
+            phase:rnd(TAU),
+            hot:random()<.08
+        });
+    }
 
-        /*
-         * 吸引到 target。
-         */
-        p.vx+=(-dx/distance)*p.speed*dtScale;
-        p.vy+=(-dy/distance)*p.speed*dtScale;
+    const stemCount=mobile?100:180;
 
-        /*
-         * 很小的流体扰动。
-         * 不改变心形，只避免机械运动。
-         */
-        const tt=performance.now()*.001;
+    for(let i=0;i<stemCount;i++){
+        stem.push({
+            phase:random(),
+            speed:rnd(.10,.24),
+            sway:rnd(-1,1),
+            size:rnd(.55,1.45),
+            alpha:rnd(.18,.62)
+        });
+    }
+}
 
-        p.vx+=Math.sin(
-            head.y*.013+
-            tt*.72+
-            p.q*.017
-        )*.008*dtScale;
+function buildStars(profile){
+    const mobile=profile==="mobile";
+    const count=mobile?130:260;
 
-        p.vy+=Math.cos(
-            head.x*.011-
-            tt*.61+
-            p.q*.013
-        )*.008*dtScale;
+    stars=[];
 
-        head.x+=p.vx*dtScale;
-        head.y+=p.vy*dtScale;
+    for(let i=0;i<count;i++){
+        stars.push({
+            x:rnd(.05,.95),
+            y:rnd(.10,.78),
+            size:random()<.05?rnd(1.5,2.4):rnd(.35,1.15),
+            alpha:rnd(.035,.22),
+            phase:rnd(TAU),
+            speed:rnd(.35,1.25)
+        });
+    }
+}
 
-        p.vx*=Math.pow(p.force,dtScale);
-        p.vy*=Math.pow(p.force,dtScale);
+function resize(){
+    W=Math.max(1,innerWidth);
+    H=Math.max(1,innerHeight);
 
-        /*
-         * trace follower
-         *
-         * 完全沿用 love6 的优秀思想：
-         * 后一个点追前一个点。
-         */
-        for(let k=0;k<p.trace.length-1;k++){
-            const a=p.trace[k];
-            const b=p.trace[k+1];
+    const profile=W<720?"mobile":"desktop";
 
-            const follow=.30+.16*(1-k/p.trace.length);
+    DPR=Math.min(
+        devicePixelRatio||1,
+        profile==="mobile"?1.55:1.9
+    );
 
-            b.x-=follow*(b.x-a.x);
-            b.y-=follow*(b.y-a.y);
+    canvas.width=Math.round(W*DPR);
+    canvas.height=Math.round(H*DPR);
+    canvas.style.width=W+"px";
+    canvas.style.height=H+"px";
+
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.imageSmoothingEnabled=true;
+
+    centerX=W*.5;
+    floorY=H*(W/H<.76?.69:.70);
+    heartUnit=Math.min(W*.36,H*.255,330);
+    floorRadius=Math.min(W*.49,H*.58,720);
+
+    bgGradient=ctx.createRadialGradient(
+        centerX,H*.44,0,
+        centerX,H*.44,
+        Math.max(W,H)*.72
+    );
+
+    bgGradient.addColorStop(0,"#182235");
+    bgGradient.addColorStop(.30,"#101827");
+    bgGradient.addColorStop(.64,"#080e19");
+    bgGradient.addColorStop(1,"#02050b");
+
+    vignetteGradient=ctx.createRadialGradient(
+        centerX,H*.48,Math.min(W,H)*.15,
+        centerX,H*.48,Math.max(W,H)*.70
+    );
+
+    vignetteGradient.addColorStop(0,"rgba(0,0,0,0)");
+    vignetteGradient.addColorStop(.68,"rgba(0,0,0,.08)");
+    vignetteGradient.addColorStop(1,"rgba(0,0,0,.64)");
+
+    if(profile!==lastProfile){
+        buildHeart(profile);
+        buildEffects(profile);
+        lastProfile=profile;
+    }
+
+    buildStars(profile);
+}
+
+function sceneState(seconds){
+    const t=seconds%10;
+
+    let zoom=1;
+
+    if(t>=6.05&&t<6.36){
+        zoom=mix(1,.68,smoother((t-6.05)/.31));
+    }else if(t>=6.36&&t<9.56){
+        zoom=.68;
+    }else if(t>=9.56){
+        zoom=mix(.68,1,smoother((t-9.56)/.44));
+    }
+
+    let rotation=0;
+
+    if(t<1.20){
+        rotation=Math.PI*smoother(t/1.20);
+    }else if(t<1.90){
+        rotation=Math.PI;
+    }else if(t<2.76){
+        rotation=
+            Math.PI+
+            Math.PI*smoother((t-1.90)/.86);
+    }else if(t<8){
+        rotation=TAU;
+    }else{
+        rotation=
+            TAU+
+            Math.PI*smoother((t-8)/2);
+    }
+
+    const ringIn=.52+.48*smooth(t/.28);
+    const ringOut=1-smooth((t-1.92)/.70);
+    const ring=ringIn*ringOut;
+
+    const flash=
+        smooth((t-1.91)/.13)*
+        (1-smooth((t-2.19)/.48));
+
+    const burst=
+        smooth((t-1.98)/.14)*
+        (1-smooth((t-2.43)/.82));
+
+    const burstProgress=clamp((t-1.92)/.48);
+
+    const linger=
+        smooth((t-2.42)/.42)*
+        (1-smooth((t-5.72)/.68));
+
+    return{
+        t,
+        zoom,
+        rotation,
+        ring,
+        flash,
+        burst,
+        burstProgress,
+        linger
+    };
+}
+
+function projectHeart(x,y,z,state,centerY){
+    const c=Math.cos(state.rotation);
+    const s=Math.sin(state.rotation);
+
+    const xr=x*c+z*s;
+    const zr=-x*s+z*c;
+    const k=1/(1-zr*.17);
+
+    projected.x=
+        centerX+
+        xr*heartUnit*state.zoom*k;
+
+    projected.y=
+        centerY-
+        y*heartUnit*1.045*state.zoom*k;
+
+    projected.k=k;
+    projected.z=zr;
+
+    return projected;
+}
+
+function projectOrbit(x,y,z,state,centerY){
+    const k=1/(1-z*.17);
+
+    projected.x=
+        centerX+
+        x*heartUnit*state.zoom*k;
+
+    projected.y=
+        centerY-
+        y*heartUnit*1.045*state.zoom*k;
+
+    projected.k=k;
+    projected.z=z;
+
+    return projected;
+}
+
+function projectFloor(x,z,zoom,angle){
+    const c=Math.cos(angle);
+    const s=Math.sin(angle);
+
+    const xr=x*c-z*s;
+    const zr=x*s+z*c;
+    const k=1/(1-zr*.27);
+
+    floorProjected.x=
+        centerX+
+        xr*floorRadius*zoom*k;
+
+    floorProjected.y=
+        floorY+
+        zr*floorRadius*.30*zoom*k;
+
+    floorProjected.z=zr;
+
+    return floorProjected;
+}
+
+function drawBackground(seconds){
+    ctx.globalCompositeOperation="source-over";
+    ctx.globalAlpha=1;
+    ctx.fillStyle=bgGradient;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#ffd2e6";
+
+    for(let i=0;i<stars.length;i++){
+        const p=stars[i];
+        const flicker=
+            .55+
+            .45*Math.sin(seconds*p.speed+p.phase);
+
+        ctx.globalAlpha=
+            p.alpha*
+            (.45+.55*flicker*flicker);
+
+        ctx.fillRect(
+            p.x*W,
+            p.y*H,
+            p.size,
+            p.size
+        );
+    }
+
+    ctx.globalAlpha=1;
+}
+
+function drawFloorGlow(state){
+    const r=floorRadius*state.zoom;
+
+    ctx.save();
+    ctx.translate(centerX,floorY);
+    ctx.scale(1,.31);
+
+    const g=ctx.createRadialGradient(
+        0,0,0,
+        0,0,r*1.05
+    );
+
+    g.addColorStop(
+        0,
+        `rgba(255,185,221,${.13+state.burst*.13})`
+    );
+
+    g.addColorStop(
+        .25,
+        "rgba(255,125,193,.055)"
+    );
+
+    g.addColorStop(
+        1,
+        "rgba(255,95,177,0)"
+    );
+
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(0,0,r*1.05,0,TAU);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function rosettePath(state,seconds){
+    const angle=seconds*.025;
+    const count=1450;
+
+    ctx.beginPath();
+
+    for(let i=0;i<=count;i++){
+        const a=i/count*TAU;
+        const wave=Math.sin(18*a);
+        const r=
+            Math.sign(wave)*
+            Math.pow(Math.abs(wave),.72);
+
+        const p=projectFloor(
+            Math.cos(a)*r,
+            Math.sin(a)*r,
+            state.zoom,
+            angle
+        );
+
+        if(i===0){
+            ctx.moveTo(p.x,p.y);
+        }else{
+            ctx.lineTo(p.x,p.y);
         }
     }
 }
 
-function drawFlow(){
+function floorCircle(radius,state,seconds){
+    const angle=seconds*.025;
+    const count=120;
+
+    ctx.beginPath();
+
+    for(let i=0;i<=count;i++){
+        const a=i/count*TAU;
+
+        const p=projectFloor(
+            Math.cos(a)*radius,
+            Math.sin(a)*radius,
+            state.zoom,
+            angle
+        );
+
+        if(i===0){
+            ctx.moveTo(p.x,p.y);
+        }else{
+            ctx.lineTo(p.x,p.y);
+        }
+    }
+}
+
+function drawFloor(state,seconds){
+    drawFloorGlow(state);
+
     ctx.save();
-
     ctx.globalCompositeOperation="lighter";
+    ctx.lineJoin="round";
+    ctx.lineCap="round";
 
-    for(const p of particles){
-        const n=p.trace.length;
+    rosettePath(state,seconds);
 
-        /*
-         * 尾巴到头部逐渐变亮，
-         * 不会出现 love6 那种统一透明度的硬线。
-         */
-        for(let k=n-1;k>=0;k--){
-            const point=p.trace[k];
+    ctx.globalAlpha=.09+state.burst*.055;
+    ctx.strokeStyle="#ff79b9";
+    ctx.lineWidth=5;
+    ctx.shadowColor="#ff71b6";
+    ctx.shadowBlur=13;
+    ctx.stroke();
 
-            const life=1-k/n;
+    rosettePath(state,seconds);
+
+    ctx.globalAlpha=.54+state.burst*.16;
+    ctx.strokeStyle="#ffd1e5";
+    ctx.lineWidth=.72;
+    ctx.shadowBlur=4;
+    ctx.stroke();
+
+    const rings=[.045,.085,.135,.205,.285];
+
+    for(let i=0;i<rings.length;i++){
+        floorCircle(rings[i],state,seconds);
+
+        ctx.globalAlpha=
+            .60-i*.065+
+            state.burst*.12;
+
+        ctx.strokeStyle=
+            i<2?
+            "#fff5fb":
+            "#ffc7df";
+
+        ctx.lineWidth=i<2?1.25:.82;
+        ctx.shadowColor="#ff84bd";
+        ctx.shadowBlur=7;
+        ctx.stroke();
+    }
+
+    const angle=seconds*.025;
+
+    ctx.fillStyle="#ffd5e7";
+    ctx.shadowBlur=0;
+
+    for(let i=0;i<floorDots.length;i++){
+        const d=floorDots[i];
+
+        const p=projectFloor(
+            d.x,
+            d.z,
+            state.zoom,
+            angle
+        );
+
+        const flicker=
+            .70+
+            .30*Math.sin(seconds*1.35+d.phase);
+
+        ctx.globalAlpha=
+            d.alpha*
+            flicker*
+            (1+state.burst*.35);
+
+        const size=
+            d.size*
+            (.78+.22*state.zoom);
+
+        ctx.fillRect(
+            p.x-size*.5,
+            p.y-size*.5,
+            size,
+            size
+        );
+    }
+
+    ctx.restore();
+}
+
+function drawStem(state,seconds){
+    const centerY=
+        floorY-
+        heartUnit*state.zoom*1.045;
+
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#ffd4e7";
+
+    for(let i=0;i<stem.length;i++){
+        const p=stem[i];
+        const life=fract(seconds*p.speed+p.phase);
+
+        const y=
+            floorY-
+            life*heartUnit*.22*state.zoom;
+
+        const width=
+            (1-life)*
+            heartUnit*.055*
+            state.zoom;
+
+        const x=
+            centerX+
+            p.sway*width+
+            Math.sin(seconds*2+p.phase*TAU)*
+            width*.13;
+
+        const fade=Math.sin(life*Math.PI);
+
+        ctx.globalAlpha=
+            p.alpha*
+            fade*
+            (.72+state.burst*.55);
+
+        ctx.fillRect(
+            x-p.size*.5,
+            y-p.size*.5,
+            p.size,
+            p.size
+        );
+    }
+
+    const g=ctx.createRadialGradient(
+        centerX,floorY,0,
+        centerX,floorY,
+        heartUnit*.17*state.zoom
+    );
+
+    g.addColorStop(
+        0,
+        `rgba(255,248,252,${.24+state.flash*.18})`
+    );
+
+    g.addColorStop(
+        .18,
+        "rgba(255,180,218,.13)"
+    );
+
+    g.addColorStop(
+        1,
+        "rgba(255,110,184,0)"
+    );
+
+    ctx.globalAlpha=1;
+    ctx.fillStyle=g;
+    ctx.beginPath();
+
+    ctx.arc(
+        centerX,
+        floorY,
+        heartUnit*.17*state.zoom,
+        0,
+        TAU
+    );
+
+    ctx.fill();
+    ctx.restore();
+
+    return centerY;
+}
+
+function drawRays(state,centerY){
+    if(
+        state.burst<=.001&&
+        state.linger<=.001
+    ){
+        return;
+    }
+
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+    ctx.shadowColor="#ff7fbd";
+    ctx.shadowBlur=7;
+
+    for(let i=0;i<rays.length;i++){
+        const ray=rays[i];
+
+        if(
+            state.burst<.012&&
+            i%6!==0
+        ){
+            continue;
+        }
+
+        const q=clamp(
+            (state.burstProgress-ray.delay)/
+            (1-ray.delay)
+        );
+
+        if(q<=0)continue;
+
+        const travel=
+            1-
+            Math.pow(1-q,2.7);
+
+        const head=
+            heartUnit*
+            state.zoom*
+            (ray.start+ray.length*travel);
+
+        const tail=
+            head-
+            heartUnit*
+            state.zoom*
+            (
+                .10+
+                .43*(1-q)+
+                ray.length*
+                (.13+state.linger*.18)
+            );
+
+        const bend=
+            Math.sin(ray.phase+q*3)*
+            heartUnit*.025;
+
+        const ca=Math.cos(ray.angle);
+        const sa=Math.sin(ray.angle);
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            centerX+
+            ca*Math.max(0,tail)-
+            sa*bend,
+
+            centerY+
+            sa*Math.max(0,tail)+
+            ca*bend
+        );
+
+        ctx.lineTo(
+            centerX+ca*head,
+            centerY+sa*head
+        );
+
+        ctx.globalAlpha=
+            ray.alpha*
+            (
+                state.burst*(1-q*.56)+
+                state.linger*.10
+            );
+
+        ctx.strokeStyle=
+            i%6===0?
+            "#fff5fb":
+            "#ff9ccc";
+
+        ctx.lineWidth=ray.width;
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+function drawFlare(state,centerY,front=false){
+    if(state.flash<=.002)return;
+
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.translate(centerX,centerY);
+    ctx.scale(.72,1);
+
+    const radius=
+        heartUnit*
+        state.zoom*
+        (front?.34:.76);
+
+    const g=ctx.createRadialGradient(
+        0,0,0,
+        0,0,radius
+    );
+
+    if(front){
+        g.addColorStop(
+            0,
+            `rgba(255,255,255,${state.flash*.28})`
+        );
+
+        g.addColorStop(
+            .30,
+            `rgba(255,224,240,${state.flash*.12})`
+        );
+    }else{
+        g.addColorStop(
+            0,
+            `rgba(255,255,255,${state.flash*.75})`
+        );
+
+        g.addColorStop(
+            .16,
+            `rgba(255,224,241,${state.flash*.46})`
+        );
+
+        g.addColorStop(
+            .48,
+            `rgba(255,114,188,${state.flash*.15})`
+        );
+    }
+
+    g.addColorStop(
+        1,
+        "rgba(255,95,177,0)"
+    );
+
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.arc(0,0,radius,0,TAU);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function orbitPoint(index,count,state,seconds){
+    const progress=index/(count-1);
+    const u=progress*TAU*3.18;
+    const phase=u+seconds*1.16;
+
+    const radius=
+        1.13+
+        .055*Math.sin(u*2.35+seconds*.7);
+
+    const x=Math.cos(phase)*radius;
+    const z=Math.sin(phase)*radius;
+
+    const y=
+        .84-
+        progress*1.68+
+        .065*Math.sin(u*1.7+seconds*.8);
+
+    return{x,y,z};
+}
+
+function traceOrbit(front,state,seconds,centerY){
+    const count=520;
+    let drawing=false;
+
+    ctx.beginPath();
+
+    for(let i=0;i<count;i++){
+        const o=orbitPoint(
+            i,
+            count,
+            state,
+            seconds
+        );
+
+        const visible=
+            front?
+            o.z>=-.02:
+            o.z<-.02;
+
+        const p=projectOrbit(
+            o.x,
+            o.y,
+            o.z,
+            state,
+            centerY
+        );
+
+        if(visible){
+            if(!drawing){
+                ctx.moveTo(p.x,p.y);
+            }else{
+                ctx.lineTo(p.x,p.y);
+            }
+
+            drawing=true;
+        }else{
+            drawing=false;
+        }
+    }
+}
+
+function drawOrbit(front,state,seconds,centerY){
+    if(state.ring<=.002)return;
+
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+    ctx.lineJoin="round";
+
+    const depth=front?1:.34;
+
+    traceOrbit(
+        front,
+        state,
+        seconds,
+        centerY
+    );
+
+    ctx.globalAlpha=
+        state.ring*
+        depth*.14;
+
+    ctx.strokeStyle="#ff69b1";
+    ctx.lineWidth=7;
+    ctx.shadowColor="#ff66b0";
+    ctx.shadowBlur=18;
+    ctx.stroke();
+
+    traceOrbit(
+        front,
+        state,
+        seconds,
+        centerY
+    );
+
+    ctx.globalAlpha=
+        state.ring*
+        depth*.94;
+
+    ctx.strokeStyle=
+        front?
+        "#ffd5e8":
+        "#ffacd0";
+
+    ctx.lineWidth=front?1.35:.82;
+    ctx.shadowColor="#ff88c1";
+    ctx.shadowBlur=8;
+    ctx.stroke();
+
+    if(front){
+        ctx.fillStyle="#fff4fa";
+        ctx.shadowBlur=0;
+
+        for(let i=0;i<95;i++){
+            const u=fract(
+                i/95+
+                seconds*.055
+            );
+
+            const index=Math.floor(u*519);
+
+            const o=orbitPoint(
+                index,
+                520,
+                state,
+                seconds
+            );
+
+            if(o.z<0)continue;
+
+            const p=projectOrbit(
+                o.x,
+                o.y,
+                o.z,
+                state,
+                centerY
+            );
 
             const alpha=
-                p.color.a*
-                Math.pow(life,1.65);
-
-            const size=
-                Math.max(
-                    .42,
-                    p.size*
-                    (.46+.54*life)
+                .26+
+                .74*Math.pow(
+                    Math.sin(
+                        (u+i*.17)*Math.PI
+                    ),
+                    2
                 );
 
-            ctx.globalAlpha=alpha;
+            ctx.globalAlpha=
+                state.ring*
+                alpha*.72;
 
-            ctx.fillStyle=
-                `rgb(${p.color.r|0},${p.color.g|0},${p.color.b|0})`;
+            const size=
+                i%17===0?
+                2.1:
+                .85;
 
             ctx.fillRect(
-                point.x-size*.5,
-                point.y-size*.5,
+                p.x-size*.5,
+                p.y-size*.5,
                 size,
                 size
             );
@@ -363,642 +1161,399 @@ function drawFlow(){
     ctx.restore();
 }
 
-/* =========================================================
-   Heart dust
-   参考 love.html 的 ParticlePool 思路：
-   心形边缘不断产生、向外减速、消散
-========================================================= */
+function traceHeart(state,centerY,zOffset=0){
+    const count=360;
 
-function pointOnOutline(){
-    const t=Math.random()*TAU;
-    const p=heartPoint(t);
+    ctx.beginPath();
 
-    const x=p.x*heartScale;
-    const y=p.y*heartScale;
+    for(let i=0;i<=count;i++){
+        const p=sampleCurve(i/count);
 
-    const l=Math.sqrt(x*x+y*y)||1;
+        const q=projectHeart(
+            p.x,
+            p.y,
+            zOffset,
+            state,
+            centerY
+        );
 
-    return {
-        x:centerX+x,
-        y:centerY+y,
-        nx:x/l,
-        ny:y/l
-    };
-}
-
-function buildEmitters(){
-    emitters=[];
-
-    const count=MOBILE()
-        ?CONFIG.emitterMobile
-        :CONFIG.emitterDesktop;
-
-    for(let i=0;i<count;i++){
-        resetEmitter({
-            age:Math.random()*2
-        },true);
+        if(i===0){
+            ctx.moveTo(q.x,q.y);
+        }else{
+            ctx.lineTo(q.x,q.y);
+        }
     }
+
+    ctx.closePath();
 }
 
-function resetEmitter(p,initial=false){
-    const h=pointOnOutline();
+function drawHeartTrace(state,centerY){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
 
-    const tangentX=-h.ny;
-    const tangentY=h.nx;
+    traceHeart(state,centerY);
 
-    const speed=rand(7,22);
+    ctx.globalAlpha=
+        .095+
+        state.flash*.08;
 
-    p.x=h.x+rand(-2,2);
-    p.y=h.y+rand(-2,2);
+    ctx.strokeStyle="#ff72b5";
+    ctx.lineWidth=9*state.zoom;
+    ctx.shadowColor="#ff68ae";
+    ctx.shadowBlur=22*state.zoom;
+    ctx.stroke();
 
-    p.px=p.x;
-    p.py=p.y;
+    traceHeart(state,centerY);
 
-    /*
-     * 不是粗暴直射，
-     * 主速度沿外法线，但混入切向速度。
-     */
-    const tangent=rand(-.60,.60);
+    ctx.globalAlpha=
+        .28+
+        state.flash*.17;
 
-    p.vx=(h.nx+tangentX*tangent)*speed;
-    p.vy=(h.ny+tangentY*tangent)*speed;
+    ctx.strokeStyle="#ffd0e4";
+    ctx.lineWidth=.75;
+    ctx.shadowColor="#ff9bc9";
+    ctx.shadowBlur=7;
+    ctx.stroke();
 
-    p.age=initial?Math.random()*2:0;
-    p.life=rand(.8,2.1);
-
-    p.size=
-        Math.random()<.92
-            ?rand(.45,1.05)
-            :rand(1.2,2.1);
-
-    p.hot=Math.random()<.075;
+    ctx.restore();
 }
 
-function updateEmitters(dt){
-    for(const p of emitters){
-        p.age+=dt;
+function frameValue(seed,a,b){
+    return(
+        a+
+        (b-a)*
+        (
+            .5+
+            .5*Math.sin(seed*12.9898)
+        )
+    );
+}
 
-        if(p.age>=p.life){
-            resetEmitter(p);
+function drawHeartParticles(
+    list,
+    kind,
+    state,
+    seconds,
+    centerY,
+    color,
+    gain
+){
+    ctx.fillStyle=color;
+
+    for(let i=0;i<list.length;i++){
+        const p=list[i];
+
+        const c=sampleCurve(
+            p.u+
+            seconds*p.flow
+        );
+
+        const oscillation=Math.sin(
+            seconds*(1.05+p.twinkle*.11)+
+            p.phase
+        );
+
+        let x,y,z;
+
+        if(kind==="inside"){
+            x=
+                c.x*p.radius+
+                p.jx;
+
+            y=
+                (c.y+.055)*p.radius-
+                .055+
+                p.jy;
+
+            x+=c.nx*p.offset;
+            y+=c.ny*p.offset;
+
+            z=
+                p.z+
+                oscillation*p.zWobble;
+        }else{
+            const offset=
+                p.offset+
+                oscillation*p.wobble;
+
+            x=c.x+c.nx*offset;
+            y=c.y+c.ny*offset;
+
+            z=
+                p.z+
+                oscillation*p.zWobble;
+        }
+
+        if(state.burst>.001){
+            const push=
+                1+
+                state.burst*
+                p.burst*.026;
+
+            x*=push;
+            y=(y+.04)*push-.04;
+        }
+
+        const q=projectHeart(
+            x,
+            y,
+            z,
+            state,
+            centerY
+        );
+
+        if(
+            q.x<-12||
+            q.x>W+12||
+            q.y<-12||
+            q.y>H+12
+        ){
             continue;
         }
 
-        p.px=p.x;
-        p.py=p.y;
-
-        /*
-         * love.html 使用 effect=-0.75，
-         * 本质是让速度逐渐衰减。
-         */
-        const drag=Math.pow(.972,dt*60);
-
-        p.vx*=drag;
-        p.vy*=drag;
-
-        /*
-         * 加非常小的旋转，
-         * 外围不会变成呆板的径向直线。
-         */
-        const angle=.010*dt*60;
-
-        const vx=
-            p.vx*Math.cos(angle)-
-            p.vy*Math.sin(angle);
-
-        const vy=
-            p.vx*Math.sin(angle)+
-            p.vy*Math.cos(angle);
-
-        p.vx=vx;
-        p.vy=vy;
-
-        p.x+=p.vx*dt;
-        p.y+=p.vy*dt;
-    }
-}
-
-function drawEmitters(){
-    ctx.save();
-
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
-
-    for(const p of emitters){
-        const q=p.age/p.life;
-
-        const fade=
-            Math.pow(1-q,1.45);
-
-        /*
-         * 极短拖尾
-         */
-        ctx.globalAlpha=fade*.16;
-
-        ctx.strokeStyle=
-            p.hot
-                ?"rgb(255,244,250)"
-                :"rgb(255,141,198)";
-
-        ctx.lineWidth=.55;
-
-        ctx.beginPath();
-        ctx.moveTo(p.px,p.py);
-        ctx.lineTo(p.x,p.y);
-        ctx.stroke();
-
-        ctx.globalAlpha=
-            fade*
-            (p.hot?.88:.42);
-
-        ctx.fillStyle=
-            p.hot
-                ?"rgb(255,250,252)"
-                :"rgb(255,166,207)";
-
-        ctx.fillRect(
-            p.x-p.size*.5,
-            p.y-p.size*.5,
-            p.size,
-            p.size
-        );
-    }
-
-    ctx.restore();
-}
-
-/* =========================================================
-   Stars
-========================================================= */
-
-function buildStars(){
-    stars=[];
-
-    const count=MOBILE()?350:900;
-
-    for(let i=0;i<count;i++){
-        stars.push({
-            x:Math.random(),
-            y:Math.random(),
-            size:Math.random()<.97?rand(.3,.8):rand(1.1,2),
-            alpha:rand(.018,.12),
-            phase:rand(0,TAU)
-        });
-    }
-}
-
-function drawBackground(time){
-    ctx.globalCompositeOperation="source-over";
-    ctx.globalAlpha=1;
-
-    ctx.fillStyle="#030106";
-    ctx.fillRect(0,0,W,H);
-
-    /*
-     * 只保留非常弱的莓粉环境色。
-     */
-    const gradient=
-        ctx.createRadialGradient(
-            centerX,
-            centerY,
-            0,
-            centerX,
-            centerY,
-            Math.max(W,H)*.46
-        );
-
-    gradient.addColorStop(
-        0,
-        "rgba(96,16,53,.105)"
-    );
-
-    gradient.addColorStop(
-        .36,
-        "rgba(52,7,31,.042)"
-    );
-
-    gradient.addColorStop(
-        1,
-        "rgba(0,0,0,0)"
-    );
-
-    ctx.fillStyle=gradient;
-    ctx.fillRect(0,0,W,H);
-
-    ctx.globalCompositeOperation="lighter";
-
-    ctx.fillStyle="#ffb3d4";
-
-    for(const s of stars){
-        ctx.globalAlpha=
-            s.alpha*
-            (.55+.45*Math.sin(time*.7+s.phase));
-
-        ctx.fillRect(
-            s.x*W,
-            s.y*H,
-            s.size,
-            s.size
-        );
-    }
-
-    ctx.globalAlpha=1;
-}
-
-/* =========================================================
-   Subtle floor
-========================================================= */
-
-function buildFloor(){
-    floorDots=[];
-
-    const count=MOBILE()?500:1200;
-
-    for(let i=0;i<count;i++){
-        floorDots.push({
-            r:Math.sqrt(Math.random()),
-            a:Math.random()*TAU,
-            size:rand(.3,.8),
-            alpha:rand(.035,.16)
-        });
-    }
-}
-
-function drawFloor(time){
-    ctx.save();
-
-    ctx.globalCompositeOperation="lighter";
-
-    const maxR=
-        Math.min(
-            W*.32,
-            heartScale*17
-        );
-
-    const squash=.21;
-
-    /*
-     * 放射线比之前弱很多。
-     * 不抢爱心主体。
-     */
-    const spokes=MOBILE()?30:46;
-
-    for(let i=0;i<spokes;i++){
-        const a=i/spokes*TAU+time*.010;
-
-        const x2=
-            centerX+
-            Math.cos(a)*maxR;
-
-        const y2=
-            floorY+
-            Math.sin(a)*maxR*squash;
-
-        const gradient=
-            ctx.createLinearGradient(
-                centerX,
-                floorY,
-                x2,
-                y2
+        const twinkle=
+            .66+
+            .34*Math.pow(
+                .5+
+                .5*Math.sin(
+                    seconds*p.twinkle+
+                    p.phase
+                ),
+                2
             );
 
-        gradient.addColorStop(
-            0,
-            "rgba(255,232,244,.22)"
+        const alpha=clamp(
+            p.alpha*
+            gain*
+            twinkle*
+            (1+state.flash*.55)
         );
 
-        gradient.addColorStop(
-            .30,
-            "rgba(255,150,204,.07)"
+        const size=
+            p.size*
+            (.78+.22*state.zoom)*
+            clamp(q.k,.78,1.24);
+
+        ctx.globalAlpha=alpha;
+
+        ctx.fillRect(
+            q.x-size*.5,
+            q.y-size*.5,
+            size,
+            size
         );
 
-        gradient.addColorStop(
-            1,
-            "rgba(255,120,190,0)"
-        );
+        if(p.hot){
+            const sprite=
+                kind==="core"?
+                glowWhite:
+                glowPink;
 
-        ctx.globalAlpha=.25;
-        ctx.strokeStyle=gradient;
-        ctx.lineWidth=.40;
+            const diameter=
+                size*
+                frameValue(
+                    p.phase,
+                    4.2,
+                    6.8
+                )*
+                (1+state.flash*.32);
 
-        ctx.beginPath();
-        ctx.moveTo(centerX,floorY);
-        ctx.lineTo(x2,y2);
-        ctx.stroke();
-    }
+            ctx.globalAlpha=
+                alpha*
+                (kind==="core"?.34:.25);
 
-    /*
-     * 波纹
-     */
-    const rings=MOBILE()?13:20;
-
-    for(let r=1;r<=rings;r++){
-        const q=r/rings;
-
-        const base=
-            maxR*
-            Math.pow(q,1.45);
-
-        ctx.beginPath();
-
-        for(let i=0;i<=150;i++){
-            const a=i/150*TAU;
-
-            const wave=
-                1+
-                (.075*(1-q)+.008)*
-                Math.sin(
-                    a*12-
-                    time*.45+
-                    r*.38
-                );
-
-            const rr=base*wave;
-
-            const x=
-                centerX+
-                Math.cos(a)*rr;
-
-            const y=
-                floorY+
-                Math.sin(a)*rr*squash;
-
-            if(i===0)ctx.moveTo(x,y);
-            else ctx.lineTo(x,y);
+            ctx.drawImage(
+                sprite,
+                q.x-diameter*.5,
+                q.y-diameter*.5,
+                diameter,
+                diameter
+            );
         }
-
-        ctx.globalAlpha=
-            .035+
-            .14*(1-q);
-
-        ctx.strokeStyle=
-            r<4
-                ?"rgb(255,228,241)"
-                :"rgb(234,130,190)";
-
-        ctx.lineWidth=
-            r<4?.65:.4;
-
-        ctx.stroke();
     }
+}
 
-    /*
-     * 微粒
-     */
-    ctx.fillStyle="#ffc7df";
+function drawDebris(state,centerY){
+    if(state.burst<=.002)return;
 
-    for(const p of floorDots){
-        const rr=p.r*maxR;
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.fillStyle="#ffc3dd";
 
-        const a=
-            p.a+
-            time*.007*
-            (1-p.r);
+    for(let i=0;i<debris.length;i++){
+        const p=debris[i];
+
+        const q=clamp(
+            (state.burstProgress-p.delay)/
+            (1-p.delay)
+        );
+
+        if(q<=0)continue;
+
+        const travel=
+            1-
+            Math.pow(1-q,2.25);
+
+        const distance=
+            heartUnit*
+            state.zoom*
+            (p.start+p.speed*travel);
+
+        const angle=
+            p.angle+
+            p.curve*q;
 
         const x=
             centerX+
-            Math.cos(a)*rr;
+            Math.cos(angle)*distance;
 
         const y=
-            floorY+
-            Math.sin(a)*rr*squash;
+            centerY+
+            Math.sin(angle)*distance;
+
+        const fade=
+            state.burst*
+            (1-q*.67);
 
         ctx.globalAlpha=
             p.alpha*
-            (1-p.r*.7);
+            fade;
 
         ctx.fillRect(
-            x,
-            y,
+            x-p.size*.5,
+            y-p.size*.5,
             p.size,
             p.size
         );
-    }
 
-    /*
-     * 中央光环
-     */
-    for(let i=0;i<5;i++){
-        const rx=8+i*9;
-        const ry=1.8+i*1.7;
+        if(p.hot){
+            const diameter=p.size*5.5;
 
-        ctx.globalAlpha=.25-i*.037;
-        ctx.strokeStyle=
-            i<2
-                ?"rgb(255,242,248)"
-                :"rgb(255,166,207)";
+            ctx.globalAlpha=
+                p.alpha*
+                fade*.24;
 
-        ctx.lineWidth=i<2?.75:.5;
-
-        ctx.beginPath();
-        ctx.ellipse(
-            centerX,
-            floorY,
-            rx,
-            ry,
-            0,
-            0,
-            TAU
-        );
-        ctx.stroke();
+            ctx.drawImage(
+                glowPink,
+                x-diameter*.5,
+                y-diameter*.5,
+                diameter,
+                diameter
+            );
+        }
     }
 
     ctx.restore();
 }
 
-/* =========================================================
-   Tip stream
-========================================================= */
-
-let tipParticles=[];
-
-function buildTipParticles(){
-    tipParticles=[];
-
-    const count=MOBILE()?70:160;
-
-    for(let i=0;i<count;i++){
-        tipParticles.push({
-            q:Math.random(),
-            speed:rand(.05,.11),
-            phase:rand(0,TAU),
-            size:Math.random()<.92?rand(.4,.9):rand(1.1,1.8),
-            alpha:rand(.15,.52)
-        });
-    }
-}
-
-function drawTip(time){
-    /*
-     * t = PI 是心尖
-     */
-    const p=heartPoint(Math.PI);
-
-    const x=centerX+p.x*heartScale;
-    const y=centerY+p.y*heartScale;
-
-    ctx.save();
-
-    ctx.globalCompositeOperation="lighter";
-
-    for(const d of tipParticles){
-        const q=(d.q+time*d.speed)%1;
-
-        const middle=
-            Math.sin(q*Math.PI);
-
-        const yy=
-            y+
-            (floorY-y)*q;
-
-        const xx=
-            x+
-            Math.sin(
-                d.phase+
-                time*1.8+
-                q*12
-            )*
-            heartScale*.045*
-            middle;
-
-        ctx.globalAlpha=
-            d.alpha*
-            middle;
-
-        ctx.fillStyle=
-            d.size>1
-                ?"rgb(255,245,250)"
-                :"rgb(255,186,218)";
-
-        ctx.fillRect(
-            xx-d.size*.5,
-            yy-d.size*.5,
-            d.size,
-            d.size
-        );
-    }
-
-    ctx.restore();
-}
-
-/* =========================================================
-   Resize
-========================================================= */
-
-function rebuild(){
-    W=innerWidth;
-    H=innerHeight;
-
-    DPR=Math.min(
-        devicePixelRatio||1,
-        1.6
-    );
-
-    canvas.width=
-        Math.round(W*DPR);
-
-    canvas.height=
-        Math.round(H*DPR);
-
-    canvas.style.width=W+"px";
-    canvas.style.height=H+"px";
-
-    ctx.setTransform(
-        DPR,
-        0,
-        0,
-        DPR,
-        0,
-        0
-    );
-
-    /*
-     * 目标：占画面约 55% 宽，
-     * 不再像你上一版大到贴边。
-     */
-    heartScale=
-        Math.min(
-            W*.54/32,
-            H*.60/29
-        );
-
-    centerX=W*.5;
-    centerY=H*.35;
-
-    /*
-     * 地面离心尖近一点，
-     * 对齐你的参考视频。
-     */
-    const tip=heartPoint(Math.PI);
-
-    floorY=
-        Math.min(
-            H*.81,
-            centerY+
-            tip.y*heartScale+
-            heartScale*2.0
-        );
-
-    buildTargets();
-    buildFlowParticles();
-    buildEmitters();
-    buildStars();
-    buildFloor();
-    buildTipParticles();
-
-    ctx.fillStyle="#030106";
+function drawVignette(){
+    ctx.globalCompositeOperation="source-over";
+    ctx.globalAlpha=1;
+    ctx.fillStyle=vignetteGradient;
     ctx.fillRect(0,0,W,H);
 }
 
-/* =========================================================
-   Render
-========================================================= */
-
 function render(now){
+    const seconds=(now-startTime)/1000;
+    const state=sceneState(seconds);
+
+    drawBackground(seconds);
+    drawFloor(state,seconds);
+
+    const centerY=drawStem(
+        state,
+        seconds
+    );
+
+    drawRays(state,centerY);
+    drawFlare(state,centerY,false);
+    drawOrbit(false,state,seconds,centerY);
+    drawHeartTrace(state,centerY);
+
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+
+    drawHeartParticles(
+        dust,
+        "dust",
+        state,
+        seconds,
+        centerY,
+        "#ff95c5",
+        .92
+    );
+
+    drawHeartParticles(
+        inside,
+        "inside",
+        state,
+        seconds,
+        centerY,
+        "#ffd2e5",
+        1
+    );
+
+    drawHeartParticles(
+        shell,
+        "shell",
+        state,
+        seconds,
+        centerY,
+        "#ffb4d3",
+        1.08
+    );
+
+    drawHeartParticles(
+        core,
+        "core",
+        state,
+        seconds,
+        centerY,
+        "#fff1f8",
+        1.16
+    );
+
+    ctx.restore();
+
+    drawOrbit(
+        true,
+        state,
+        seconds,
+        centerY
+    );
+
+    drawDebris(state,centerY);
+    drawFlare(state,centerY,true);
+    drawVignette();
+
     requestAnimationFrame(render);
-
-    const time=now*.001;
-
-    const dt=
-        Math.min(
-            (now-lastTime)/1000,
-            .033
-        );
-
-    lastTime=now;
-
-    drawBackground(time);
-
-    /*
-     * 地面最先画。
-     */
-    drawFloor(time);
-
-    updateEmitters(dt);
-    drawEmitters();
-
-    /*
-     * 主体的 trace 粒子最后画，
-     * 确保白粉色心体最清晰。
-     */
-    updateFlow(dt);
-    drawFlow();
-
-    drawTip(time);
 }
+
+buildCurve();
+buildFloor();
+
+glowPink=makeGlow(
+    64,
+    "rgba(255,232,244,.96)",
+    "rgba(255,118,186,.42)"
+);
+
+glowWhite=makeGlow(
+    64,
+    "rgba(255,255,255,.98)",
+    "rgba(255,191,220,.48)"
+);
 
 addEventListener(
     "resize",
-    ()=>{
-        clearTimeout(resizeTimer);
-        resizeTimer=setTimeout(rebuild,120);
-    },
+    resize,
     {passive:true}
 );
 
-rebuild();
+resize();
 requestAnimationFrame(render);
-
 })();
 </script>
 </body>
 </html>
+```
