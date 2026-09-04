@@ -1,1078 +1,1447 @@
----
-layout: false
-permalink: /love/
----
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Love</title>
 <style>
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-html, body {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#05030b}
+body{
     background:
-        radial-gradient(circle at 50% 42%, rgba(88, 30, 86, 0.36), transparent 38%),
-        radial-gradient(circle at 50% 70%, rgba(48, 25, 82, 0.25), transparent 45%),
-        #070611;
+        radial-gradient(circle at 50% 44%,rgba(82,20,77,.24) 0%,rgba(25,8,40,.12) 35%,rgba(5,3,11,0) 62%),
+        radial-gradient(circle at 50% 100%,rgba(64,24,90,.16),transparent 48%),
+        #05030b;
 }
-body {
-    font-family: Arial, sans-serif;
+canvas{position:fixed;inset:0;display:block;width:100%;height:100%}
+.home{
+    position:fixed;
+    z-index:10;
+    left:24px;
+    top:22px;
+    color:rgba(255,230,244,.32);
+    text-decoration:none;
+    font:11px/1 Arial,sans-serif;
+    letter-spacing:3px;
+    transition:.35s;
+    user-select:none;
 }
-#heartCanvas {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+.home:hover{
+    color:rgba(255,230,244,.9);
+    text-shadow:0 0 14px rgba(255,130,210,.8);
 }
-.back {
-    position: fixed;
-    top: 24px;
-    left: 26px;
-    z-index: 10;
-    color: rgba(255,255,255,.55);
-    text-decoration: none;
-    font-size: 14px;
-    letter-spacing: 1px;
-    transition: .3s;
+.loading{
+    position:fixed;
+    inset:0;
+    z-index:20;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    pointer-events:none;
+    color:rgba(255,210,235,.55);
+    background:#05030b;
+    font:10px Arial,sans-serif;
+    letter-spacing:5px;
+    transition:opacity 1.2s ease;
 }
-.back:hover {
-    color: #ffc4e7;
-    text-shadow: 0 0 12px rgba(255,150,215,.7);
-}
-.tip {
-    position: fixed;
-    left: 50%;
-    bottom: 25px;
-    transform: translateX(-50%);
-    z-index: 10;
-    color: rgba(255,220,240,.35);
-    font-size: 12px;
-    letter-spacing: 2px;
-    pointer-events: none;
-}
-@media(max-width:768px) {
-    .back {
-        top: 18px;
-        left: 18px;
-    }
-    .tip {
-        bottom: 18px;
-        font-size: 10px;
-    }
+.loading.hide{opacity:0}
+@media(max-width:768px){
+    .home{left:17px;top:17px;font-size:9px}
 }
 </style>
-</head>
 
+<script type="importmap">
+{
+    "imports":{
+        "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    }
+}
+</script>
+</head>
 <body>
 
-<a class="back" href="/">← HOME</a>
+<a class="home" href="/">HOME</a>
+<div class="loading" id="loading">LOVE</div>
 
-<canvas id="heartCanvas"></canvas>
+<script type="module">
+import * as THREE from "three";
+import {EffectComposer} from "three/addons/postprocessing/EffectComposer.js";
+import {RenderPass} from "three/addons/postprocessing/RenderPass.js";
+import {UnrealBloomPass} from "three/addons/postprocessing/UnrealBloomPass.js";
+import {OutputPass} from "three/addons/postprocessing/OutputPass.js";
 
-<div class="tip">LOVE IS THE LIGHT</div>
+const MOBILE=window.innerWidth<768;
+const CONFIG={
+    mainCount:MOBILE?26000:50000,
+    auraCount:MOBILE?5000:12000,
+    streamCount:MOBILE?2600:6500,
+    starCount:MOBILE?700:1800,
+    floorCount:MOBILE?2600:5500,
+    rayCount:MOBILE?45:100,
+    pixelRatio:Math.min(window.devicePixelRatio||1,MOBILE?1.35:1.8)
+};
 
-<script>
-(function() {
-    "use strict";
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x05030b,0.013);
 
-    const canvas = document.getElementById("heartCanvas");
-    const ctx = canvas.getContext("2d");
+const camera=new THREE.PerspectiveCamera(
+    MOBILE?58:52,
+    innerWidth/innerHeight,
+    .1,
+    250
+);
 
-    let W = 0;
-    let H = 0;
-    let DPR = 1;
+camera.position.set(0,MOBILE?2.5:2.0,MOBILE?54:43);
 
-    let particles = [];
-    let rays = [];
-    let stars = [];
+const renderer=new THREE.WebGLRenderer({
+    antialias:false,
+    alpha:true,
+    powerPreference:"high-performance"
+});
 
-    let mouseX = 0;
-    let mouseY = 0;
-    let targetMouseX = 0;
-    let targetMouseY = 0;
+renderer.setPixelRatio(CONFIG.pixelRatio);
+renderer.setSize(innerWidth,innerHeight);
+renderer.setClearColor(0x05030b,1);
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.08;
+document.body.appendChild(renderer.domElement);
 
-    const CONFIG = {
-        desktopParticles: 1800,
-        mobileParticles: 900,
-        desktopRays: 180,
-        mobileRays: 90,
-        heartWidth: 380,
-        heartbeat: 0.065,
-        spring: 0.055
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+
+const bloom=new UnrealBloomPass(
+    new THREE.Vector2(innerWidth,innerHeight),
+    1.9,
+    .78,
+    .03
+);
+
+bloom.threshold=.02;
+bloom.strength=MOBILE?1.45:1.8;
+bloom.radius=.82;
+
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+const clock=new THREE.Clock();
+
+const heartGroup=new THREE.Group();
+heartGroup.position.y=2.2;
+scene.add(heartGroup);
+
+function randomNormal(){
+    const u=1-Math.random();
+    const v=Math.random();
+    return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
+function heartPoint(t){
+    const s=Math.sin(t);
+    return new THREE.Vector3(
+        16*s*s*s,
+        13*Math.cos(t)
+        -5*Math.cos(2*t)
+        -2*Math.cos(3*t)
+        -Math.cos(4*t),
+        0
+    );
+}
+
+function makeColor(type,rnd,t,scale){
+    const c=new THREE.Color();
+
+    if(type==="aura"){
+        if(rnd<.45)c.setRGB(.92,.25,.76);
+        else if(rnd<.78)c.setRGB(.72,.25,1);
+        else c.setRGB(1,.48,.84);
+
+        c.multiplyScalar(.55+Math.random()*.3);
+        return c;
+    }
+
+    const nearDip=
+        Math.abs(Math.sin(t))<.18 &&
+        Math.cos(t)>.25;
+
+    const hot=Math.random();
+
+    if(nearDip||hot<.22){
+        c.setRGB(1,.88,.96);
+    }else if(hot<.52){
+        c.setRGB(1,.53,.81);
+    }else if(hot<.84){
+        c.setRGB(.95,.31,.72);
+    }else{
+        c.setRGB(.75,.28,1);
+    }
+
+    if(scale>.98)c.lerp(new THREE.Color(1,.82,.94),.25);
+
+    return c;
+}
+
+const heartVertex=`
+attribute float aSize;
+attribute float aSeed;
+attribute float aAlpha;
+attribute vec3 color;
+
+uniform float uTime;
+uniform float uBeat;
+
+varying vec3 vColor;
+varying float vAlpha;
+varying float vSeed;
+
+void main(){
+    vec3 p=position;
+
+    float n1=sin(
+        p.x*.62+
+        uTime*1.10+
+        aSeed*12.0
+    );
+
+    float n2=cos(
+        p.y*.57-
+        uTime*.86+
+        aSeed*9.0
+    );
+
+    float n3=sin(
+        (p.x+p.y)*.26+
+        uTime*.55+
+        aSeed*17.0
+    );
+
+    float breathe=
+        1.0+
+        uBeat*.032+
+        sin(uTime*.72)*.007;
+
+    p.xy*=breathe;
+
+    p.x+=n1*.075+n3*.035;
+    p.y+=n2*.070+n3*.025;
+    p.z+=sin(uTime*.65+aSeed*15.0)*.11;
+
+    vec4 mv=modelViewMatrix*vec4(p,1.0);
+
+    float perspective=
+        260.0/
+        max(8.0,-mv.z);
+
+    gl_PointSize=
+        clamp(
+            aSize*perspective,
+            .55,
+            7.0
+        );
+
+    gl_Position=
+        projectionMatrix*mv;
+
+    vColor=color;
+    vAlpha=aAlpha;
+    vSeed=aSeed;
+}
+`;
+
+const heartFragment=`
+precision highp float;
+
+varying vec3 vColor;
+varying float vAlpha;
+varying float vSeed;
+
+void main(){
+    vec2 uv=
+        gl_PointCoord-
+        vec2(.5);
+
+    float d=length(uv);
+
+    if(d>.5)discard;
+
+    float core=
+        1.0-
+        smoothstep(
+            .0,
+            .5,
+            d
+        );
+
+    float soft=
+        pow(core,2.3);
+
+    float hot=
+        pow(
+            max(
+                0.0,
+                1.0-d*4.2
+            ),
+            3.0
+        );
+
+    vec3 col=
+        mix(
+            vColor,
+            vec3(1.0,.93,.98),
+            hot*.7
+        );
+
+    gl_FragColor=
+        vec4(
+            col,
+            soft*vAlpha
+        );
+}
+`;
+
+function createHeartSystem(count,type){
+    const pos=new Float32Array(count*3);
+    const colors=new Float32Array(count*3);
+    const sizes=new Float32Array(count);
+    const seeds=new Float32Array(count);
+    const alphas=new Float32Array(count);
+
+    for(let i=0;i<count;i++){
+        const t=Math.random()*Math.PI*2;
+        const hp=heartPoint(t);
+
+        let scale;
+        let spread;
+        let zSpread;
+
+        if(type==="aura"){
+            scale=
+                1.0+
+                Math.pow(
+                    Math.random(),
+                    1.7
+                )*.18;
+
+            spread=1.55;
+            zSpread=6.8;
+        }else{
+            const mode=Math.random();
+
+            if(mode<.73){
+                scale=
+                    .80+
+                    Math.pow(
+                        Math.random(),
+                        .20
+                    )*.225;
+            }else if(mode<.91){
+                scale=
+                    .35+
+                    Math.sqrt(
+                        Math.random()
+                    )*.54;
+            }else{
+                scale=
+                    1.0+
+                    Math.random()*.055;
+            }
+
+            spread=
+                mode<.73
+                    ?.55
+                    :.85;
+
+            zSpread=
+                2.5+
+                (1-scale)*2.5;
+        }
+
+        const i3=i*3;
+
+        pos[i3]=
+            hp.x*scale+
+            randomNormal()*spread*.33;
+
+        pos[i3+1]=
+            hp.y*scale+
+            randomNormal()*spread*.31;
+
+        pos[i3+2]=
+            randomNormal()*
+            zSpread*.32;
+
+        const c=
+            makeColor(
+                type,
+                Math.random(),
+                t,
+                scale
+            );
+
+        colors[i3]=c.r;
+        colors[i3+1]=c.g;
+        colors[i3+2]=c.b;
+
+        if(type==="aura"){
+            sizes[i]=
+                .16+
+                Math.pow(
+                    Math.random(),
+                    2
+                )*.38;
+
+            alphas[i]=
+                .07+
+                Math.random()*.13;
+        }else{
+            const r=Math.random();
+
+            sizes[i]=
+                r<.86
+                    ?.07+
+                    Math.random()*.11
+                    :.15+
+                    Math.random()*.16;
+
+            alphas[i]=
+                .34+
+                Math.random()*.58;
+        }
+
+        seeds[i]=Math.random();
+    }
+
+    const geometry=
+        new THREE.BufferGeometry();
+
+    geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(pos,3)
+    );
+
+    geometry.setAttribute(
+        "color",
+        new THREE.BufferAttribute(colors,3)
+    );
+
+    geometry.setAttribute(
+        "aSize",
+        new THREE.BufferAttribute(sizes,1)
+    );
+
+    geometry.setAttribute(
+        "aSeed",
+        new THREE.BufferAttribute(seeds,1)
+    );
+
+    geometry.setAttribute(
+        "aAlpha",
+        new THREE.BufferAttribute(alphas,1)
+    );
+
+    const material=
+        new THREE.ShaderMaterial({
+            vertexShader:heartVertex,
+            fragmentShader:heartFragment,
+
+            uniforms:{
+                uTime:{value:0},
+                uBeat:{value:0}
+            },
+
+            vertexColors:true,
+            transparent:true,
+            depthWrite:false,
+            depthTest:true,
+
+            blending:
+                THREE.AdditiveBlending
+        });
+
+    const points=
+        new THREE.Points(
+            geometry,
+            material
+        );
+
+    points.frustumCulled=false;
+
+    heartGroup.add(points);
+
+    return {
+        points,
+        material
     };
-
-    function rand(min, max) {
-        return Math.random() * (max - min) + min;
-    }
-
-    function heartPoint(t) {
-        const x = 16 * Math.pow(Math.sin(t), 3);
-
-        const y =
-            13 * Math.cos(t) -
-            5 * Math.cos(2 * t) -
-            2 * Math.cos(3 * t) -
-            Math.cos(4 * t);
-
-        return {
-            x: x,
-            y: -y
-        };
-    }
-
-    class HeartParticle {
-        constructor() {
-            this.init();
-        }
-
-        init() {
-            this.angle = rand(0, Math.PI * 2);
-
-            const hp = heartPoint(this.angle);
-
-            if (Math.random() < 0.48) {
-                this.radius = rand(0.91, 1.07);
-            } else {
-                this.radius = Math.pow(Math.random(), 0.23);
-                this.radius = 0.12 + this.radius * 0.88;
-            }
-
-            this.hx = hp.x * this.radius;
-            this.hy = hp.y * this.radius;
-
-            this.depth = rand(0.78, 1.25);
-
-            this.phase = rand(0, Math.PI * 2);
-            this.speed = rand(0.5, 1.8);
-
-            this.size = rand(0.5, 2.2);
-
-            const r = Math.random();
-
-            if (r < 0.50) {
-                this.rgb = "255,218,240";
-            } else if (r < 0.80) {
-                this.rgb = "255,145,207";
-            } else if (r < 0.94) {
-                this.rgb = "222,143,255";
-            } else {
-                this.rgb = "255,255,255";
-            }
-
-            this.alpha = rand(0.45, 0.95);
-            this.twinkle = rand(0.7, 2.5);
-
-            const direction = rand(0, Math.PI * 2);
-            const distance = rand(80, Math.max(W, H) * 0.52);
-
-            this.x =
-                W / 2 +
-                Math.cos(direction) * distance;
-
-            this.y =
-                H * 0.43 +
-                Math.sin(direction) * distance;
-
-            this.oldX = this.x;
-            this.oldY = this.y;
-        }
-
-        update(time, scale, cx, cy) {
-            this.oldX = this.x;
-            this.oldY = this.y;
-
-            const floatingX =
-                Math.sin(time * 0.0014 * this.speed + this.phase)
-                * 2.6
-                * this.depth;
-
-            const floatingY =
-                Math.cos(time * 0.0011 * this.speed + this.phase)
-                * 2.1
-                * this.depth;
-
-            const tinyPulse =
-                1 +
-                Math.sin(time * 0.002 + this.phase) * 0.012;
-
-            const tx =
-                cx +
-                this.hx *
-                scale *
-                this.depth *
-                tinyPulse +
-                floatingX;
-
-            const ty =
-                cy +
-                this.hy *
-                scale *
-                this.depth *
-                tinyPulse +
-                floatingY;
-
-            this.x += (tx - this.x) * CONFIG.spring;
-            this.y += (ty - this.y) * CONFIG.spring;
-        }
-
-        draw(time) {
-            const flicker =
-                0.65 +
-                Math.sin(
-                    time * 0.004 * this.twinkle +
-                    this.phase
-                ) * 0.35;
-
-            const size =
-                Math.max(
-                    0.35,
-                    this.size *
-                    this.depth *
-                    flicker
-                );
-
-            ctx.globalAlpha =
-                0.18 *
-                this.alpha *
-                flicker;
-
-            ctx.strokeStyle =
-                "rgba(" +
-                this.rgb +
-                ",1)";
-
-            ctx.lineWidth =
-                Math.max(
-                    0.3,
-                    size * 0.42
-                );
-
-            ctx.beginPath();
-            ctx.moveTo(this.oldX, this.oldY);
-            ctx.lineTo(this.x, this.y);
-            ctx.stroke();
-
-            ctx.globalAlpha =
-                this.alpha *
-                flicker;
-
-            ctx.fillStyle =
-                "rgba(" +
-                this.rgb +
-                ",1)";
-
-            ctx.beginPath();
-            ctx.arc(
-                this.x,
-                this.y,
-                size,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-
-            if (size > 1.45) {
-                ctx.globalAlpha =
-                    0.12 *
-                    flicker;
-
-                ctx.beginPath();
-
-                ctx.arc(
-                    this.x,
-                    this.y,
-                    size * 4,
-                    0,
-                    Math.PI * 2
-                );
-
-                ctx.fill();
-            }
-        }
-    }
-
-    class Ray {
-        constructor() {
-            this.reset(true);
-        }
-
-        reset(first) {
-            this.angle =
-                rand(0, Math.PI * 2);
-
-            this.distance =
-                first
-                    ? rand(130, 480)
-                    : rand(135, 190);
-
-            this.length =
-                rand(5, 42);
-
-            this.speed =
-                rand(0.35, 1.5);
-
-            this.alpha =
-                rand(0.05, 0.35);
-
-            this.width =
-                rand(0.3, 1.2);
-
-            this.phase =
-                rand(0, Math.PI * 2);
-        }
-
-        update() {
-            this.distance += this.speed;
-
-            if (
-                this.distance >
-                Math.max(W, H) * 0.72
-            ) {
-                this.reset(false);
-            }
-        }
-
-        draw(time, cx, cy) {
-            const flicker =
-                0.4 +
-                Math.abs(
-                    Math.sin(
-                        time * 0.002 +
-                        this.phase
-                    )
-                ) * 0.6;
-
-            const squash = 0.88;
-
-            const x1 =
-                cx +
-                Math.cos(this.angle) *
-                this.distance;
-
-            const y1 =
-                cy +
-                Math.sin(this.angle) *
-                this.distance *
-                squash;
-
-            const x2 =
-                cx +
-                Math.cos(this.angle) *
-                (this.distance + this.length);
-
-            const y2 =
-                cy +
-                Math.sin(this.angle) *
-                (this.distance + this.length) *
-                squash;
-
-            ctx.globalAlpha =
-                this.alpha *
-                flicker;
-
-            ctx.strokeStyle =
-                "rgba(255,168,222,1)";
-
-            ctx.lineWidth =
-                this.width;
-
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.stroke();
-        }
-    }
-
-    class Star {
-        constructor() {
-            this.reset();
-        }
-
-        reset() {
-            this.x = rand(0, W);
-            this.y = rand(0, H);
-
-            this.size =
-                rand(0.25, 1.35);
-
-            this.alpha =
-                rand(0.08, 0.65);
-
-            this.phase =
-                rand(0, Math.PI * 2);
-
-            this.speed =
-                rand(0.5, 2);
-        }
-
-        draw(time) {
-            const glow =
-                0.45 +
-                Math.sin(
-                    time * 0.0015 *
-                    this.speed +
-                    this.phase
-                ) * 0.4;
-
-            ctx.globalAlpha =
-                this.alpha *
-                glow;
-
-            ctx.fillStyle =
-                "rgba(255,205,240,1)";
-
-            ctx.beginPath();
-            ctx.arc(
-                this.x,
-                this.y,
-                this.size,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-        }
-    }
-
-    function drawAura(cx, cy, scale) {
-        const gradient =
-            ctx.createRadialGradient(
-                cx,
-                cy,
-                scale * 3,
-                cx,
-                cy,
-                scale * 25
-            );
-
-        gradient.addColorStop(
-            0,
-            "rgba(255,180,225,0.11)"
+}
+
+const mainHeart=
+    createHeartSystem(
+        CONFIG.mainCount,
+        "main"
+    );
+
+const auraHeart=
+    createHeartSystem(
+        CONFIG.auraCount,
+        "aura"
+    );
+
+/* ============================
+   OUTWARD STREAM PARTICLES
+============================ */
+
+const streamVertex=`
+attribute vec3 aStart;
+attribute vec3 aDirection;
+attribute float aPhase;
+attribute float aSpeed;
+attribute float aSize;
+attribute float aAlpha;
+attribute vec3 color;
+
+uniform float uTime;
+
+varying vec3 vColor;
+varying float vAlpha;
+
+void main(){
+    float q=
+        fract(
+            aPhase+
+            uTime*aSpeed
         );
 
-        gradient.addColorStop(
-            0.35,
-            "rgba(255,112,199,0.06)"
+    float travel=
+        pow(q,1.45);
+
+    vec3 p=
+        aStart+
+        aDirection*
+        travel*
+        18.0;
+
+    p.x+=
+        sin(
+            uTime*3.0+
+            aPhase*20.0
+        )*.10*q;
+
+    p.y+=
+        cos(
+            uTime*2.3+
+            aPhase*15.0
+        )*.08*q;
+
+    vec4 mv=
+        modelViewMatrix*
+        vec4(p,1.0);
+
+    gl_PointSize=
+        clamp(
+            aSize*
+            270.0/
+            max(8.0,-mv.z),
+            .45,
+            4.0
         );
 
-        gradient.addColorStop(
-            0.67,
-            "rgba(189,105,255,0.028)"
+    gl_Position=
+        projectionMatrix*mv;
+
+    vColor=color;
+
+    vAlpha=
+        aAlpha*
+        pow(
+            1.0-q,
+            1.4
+        );
+}
+`;
+
+const streamFragment=`
+precision highp float;
+
+varying vec3 vColor;
+varying float vAlpha;
+
+void main(){
+    vec2 p=
+        gl_PointCoord-
+        .5;
+
+    float d=
+        length(p);
+
+    if(d>.5)discard;
+
+    float a=
+        pow(
+            1.0-
+            d*2.0,
+            2.0
         );
 
-        gradient.addColorStop(
-            1,
-            "rgba(100,50,180,0)"
+    gl_FragColor=
+        vec4(
+            vColor,
+            a*vAlpha
         );
+}
+`;
 
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = gradient;
+function createStreams(){
+    const n=CONFIG.streamCount;
 
-        ctx.beginPath();
+    const starts=new Float32Array(n*3);
+    const dirs=new Float32Array(n*3);
+    const colors=new Float32Array(n*3);
 
-        ctx.arc(
-            cx,
-            cy,
-            scale * 25,
-            0,
-            Math.PI * 2
-        );
+    const phase=new Float32Array(n);
+    const speed=new Float32Array(n);
+    const size=new Float32Array(n);
+    const alpha=new Float32Array(n);
 
-        ctx.fill();
-    }
+    for(let i=0;i<n;i++){
+        const t=Math.random()*Math.PI*2;
+        const hp=heartPoint(t);
 
-    function drawHeartOutline(time, cx, cy, scale, heartbeat) {
-        ctx.save();
+        const scale=
+            .92+
+            Math.random()*.10;
 
-        ctx.globalCompositeOperation = "lighter";
+        const x=
+            hp.x*scale+
+            randomNormal()*.35;
 
-        for (let k = 0; k < 3; k++) {
-            ctx.beginPath();
+        const y=
+            hp.y*scale+
+            randomNormal()*.30;
 
-            const steps = 240;
+        const z=
+            randomNormal()*1.2;
 
-            for (let i = 0; i <= steps; i++) {
-                const t =
-                    i / steps *
-                    Math.PI *
-                    2;
+        const i3=i*3;
 
-                const hp =
-                    heartPoint(t);
+        starts[i3]=x;
+        starts[i3+1]=y;
+        starts[i3+2]=z;
 
-                const jitter =
-                    Math.sin(
-                        t * 17 +
-                        time * 0.0012 +
-                        k
-                    ) *
-                    (0.02 + k * 0.008);
-
-                const s =
-                    scale *
-                    heartbeat *
-                    (1 + jitter) *
-                    (1 + k * 0.012);
-
-                const x =
-                    cx +
-                    hp.x * s;
-
-                const y =
-                    cy +
-                    hp.y * s;
-
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-
-            ctx.closePath();
-
-            ctx.strokeStyle =
-                k === 0
-                    ? "rgba(255,225,245,.32)"
-                    : "rgba(255,125,205,.13)";
-
-            ctx.lineWidth =
-                k === 0
-                    ? 0.75
-                    : 1.4 + k;
-
-            ctx.stroke();
-        }
-
-        ctx.restore();
-    }
-
-    function drawGround(time, cx, cy, scale) {
-        const baseY =
-            cy +
-            scale * 18.5;
-
-        ctx.save();
-
-        ctx.globalCompositeOperation =
-            "lighter";
-
-        /*
-         * 心形下方中央发光点
-         */
-        const glow =
-            ctx.createRadialGradient(
-                cx,
-                baseY,
-                0,
-                cx,
-                baseY,
-                75
-            );
-
-        glow.addColorStop(
-            0,
-            "rgba(255,230,248,.3)"
-        );
-
-        glow.addColorStop(
-            .25,
-            "rgba(255,132,213,.12)"
-        );
-
-        glow.addColorStop(
-            1,
-            "rgba(176,100,255,0)"
-        );
-
-        ctx.fillStyle = glow;
-        ctx.globalAlpha = 1;
-
-        ctx.beginPath();
-
-        ctx.ellipse(
-            cx,
-            baseY,
-            90,
-            20,
-            0,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-
-        /*
-         * 中央三个光环
-         */
-        for (let i = 0; i < 4; i++) {
-            const pulse =
-                1 +
-                Math.sin(
-                    time * 0.002 +
-                    i * 0.8
-                ) * 0.08;
-
-            ctx.globalAlpha =
-                0.28 -
-                i * 0.05;
-
-            ctx.strokeStyle =
-                "rgba(255,205,240,1)";
-
-            ctx.lineWidth = 1;
-
-            ctx.beginPath();
-
-            ctx.ellipse(
-                cx,
-                baseY + i,
-                (17 + i * 13) *
-                pulse,
-                (4 + i * 2.4) *
-                pulse,
-                0,
-                0,
-                Math.PI * 2
-            );
-
-            ctx.stroke();
-        }
-
-        /*
-         * 透视圆形网格
-         */
-        for (let i = 0; i < 16; i++) {
-            const radius =
-                28 +
-                i * 25;
-
-            const wave =
-                Math.sin(
-                    time * 0.0015 -
-                    i * 0.45
-                ) * 2;
-
-            ctx.globalAlpha =
-                Math.max(
-                    0.018,
-                    0.17 -
-                    i * 0.009
-                );
-
-            ctx.strokeStyle =
-                i % 2
-                    ? "rgba(217,160,255,1)"
-                    : "rgba(255,190,232,1)";
-
-            ctx.lineWidth =
-                0.6;
-
-            ctx.setLineDash([
-                1.2,
-                5
-            ]);
-
-            ctx.beginPath();
-
-            ctx.ellipse(
-                cx,
-                baseY + i * 1.35,
-                radius + wave,
-                radius * 0.19,
-                0,
-                0,
-                Math.PI * 2
-            );
-
-            ctx.stroke();
-        }
-
-        ctx.setLineDash([]);
-
-        /*
-         * 向外发散的地面线
-         */
-        const lines = 36;
-
-        for (
-            let i = 0;
-            i < lines;
-            i++
-        ) {
-            const a =
-                i / lines *
-                Math.PI *
-                2;
-
-            const radius = 430;
-
-            const x =
-                cx +
-                Math.cos(a) *
-                radius;
-
-            const y =
-                baseY +
-                Math.sin(a) *
-                radius *
-                0.18;
-
-            ctx.globalAlpha =
-                0.055;
-
-            ctx.strokeStyle =
-                "rgba(225,175,255,1)";
-
-            ctx.lineWidth =
-                0.55;
-
-            ctx.beginPath();
-
-            ctx.moveTo(
-                cx,
-                baseY
-            );
-
-            ctx.lineTo(
+        const dir=
+            new THREE.Vector3(
                 x,
-                y
-            );
+                y*.9,
+                z+randomNormal()*2
+            )
+            .normalize();
 
-            ctx.stroke();
-        }
+        dir.x+=
+            randomNormal()*.11;
 
-        ctx.restore();
-    }
+        dir.y+=
+            randomNormal()*.11;
 
-    function createScene() {
-        particles = [];
-        rays = [];
-        stars = [];
+        dir.z+=
+            randomNormal()*.13;
 
-        const mobile =
-            W <= 768;
+        dirs[i3]=dir.x;
+        dirs[i3+1]=dir.y;
+        dirs[i3+2]=dir.z;
 
-        const particleCount =
-            mobile
-                ? CONFIG.mobileParticles
-                : CONFIG.desktopParticles;
-
-        const rayCount =
-            mobile
-                ? CONFIG.mobileRays
-                : CONFIG.desktopRays;
-
-        const starCount =
-            mobile
-                ? 110
-                : 230;
-
-        for (
-            let i = 0;
-            i < particleCount;
-            i++
-        ) {
-            particles.push(
-                new HeartParticle()
-            );
-        }
-
-        for (
-            let i = 0;
-            i < rayCount;
-            i++
-        ) {
-            rays.push(
-                new Ray()
-            );
-        }
-
-        for (
-            let i = 0;
-            i < starCount;
-            i++
-        ) {
-            stars.push(
-                new Star()
-            );
-        }
-    }
-
-    function resize() {
-        W =
-            window.innerWidth;
-
-        H =
-            window.innerHeight;
-
-        DPR =
-            Math.min(
-                window.devicePixelRatio ||
-                1,
-                1.6
-            );
-
-        canvas.width =
-            Math.floor(
-                W * DPR
-            );
-
-        canvas.height =
-            Math.floor(
-                H * DPR
-            );
-
-        canvas.style.width =
-            W + "px";
-
-        canvas.style.height =
-            H + "px";
-
-        ctx.setTransform(
-            DPR,
-            0,
-            0,
-            DPR,
-            0,
-            0
-        );
-
-        createScene();
-    }
-
-    function animate(time) {
-        ctx.clearRect(
-            0,
-            0,
-            W,
-            H
-        );
-
-        mouseX +=
-            (targetMouseX -
-            mouseX) *
-            0.035;
-
-        mouseY +=
-            (targetMouseY -
-            mouseY) *
-            0.035;
-
-        let cx =
-            W * 0.5 +
-            mouseX * 13;
-
-        let cy =
-            H * 0.405 +
-            mouseY * 8;
-
-        const targetWidth =
-            W < 768
-                ? Math.min(
-                    W * 0.68,
-                    310
+        const c=
+            Math.random()<.48
+                ?new THREE.Color(
+                    1,
+                    .72,
+                    .90
                 )
-                : Math.min(
-                    CONFIG.heartWidth,
-                    H * 0.47
+                :new THREE.Color(
+                    1,
+                    .35,
+                    .73
                 );
 
-        const scale =
-            targetWidth / 32;
+        colors[i3]=c.r;
+        colors[i3+1]=c.g;
+        colors[i3+2]=c.b;
 
-        /*
-         * 双脉冲心跳
-         */
-        const beatTime =
-            (time * 0.00115) %
-            1;
+        phase[i]=Math.random();
 
-        let beat = 0;
+        speed[i]=
+            .025+
+            Math.random()*.07;
 
-        if (
-            beatTime > 0.02 &&
-            beatTime < 0.14
-        ) {
-            const t =
-                (beatTime - 0.02) /
-                0.12;
+        size[i]=
+            .08+
+            Math.random()*.11;
 
-            beat +=
-                Math.sin(
-                    t *
-                    Math.PI
+        alpha[i]=
+            .18+
+            Math.random()*.60;
+    }
+
+    const g=
+        new THREE.BufferGeometry();
+
+    g.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+            new Float32Array(n*3),
+            3
+        )
+    );
+
+    g.setAttribute(
+        "aStart",
+        new THREE.BufferAttribute(starts,3)
+    );
+
+    g.setAttribute(
+        "aDirection",
+        new THREE.BufferAttribute(dirs,3)
+    );
+
+    g.setAttribute(
+        "color",
+        new THREE.BufferAttribute(colors,3)
+    );
+
+    g.setAttribute(
+        "aPhase",
+        new THREE.BufferAttribute(phase,1)
+    );
+
+    g.setAttribute(
+        "aSpeed",
+        new THREE.BufferAttribute(speed,1)
+    );
+
+    g.setAttribute(
+        "aSize",
+        new THREE.BufferAttribute(size,1)
+    );
+
+    g.setAttribute(
+        "aAlpha",
+        new THREE.BufferAttribute(alpha,1)
+    );
+
+    const m=
+        new THREE.ShaderMaterial({
+            vertexShader:streamVertex,
+            fragmentShader:streamFragment,
+
+            uniforms:{
+                uTime:{value:0}
+            },
+
+            transparent:true,
+            depthWrite:false,
+            blending:
+                THREE.AdditiveBlending
+        });
+
+    const p=
+        new THREE.Points(g,m);
+
+    p.frustumCulled=false;
+
+    heartGroup.add(p);
+
+    return {
+        points:p,
+        material:m
+    };
+}
+
+const streams=createStreams();
+
+/* ============================
+   CENTRAL FALLING / RISING DUST
+============================ */
+
+function createFountain(){
+    const n=MOBILE?700:1700;
+
+    const position=
+        new Float32Array(n*3);
+
+    const color=
+        new Float32Array(n*3);
+
+    for(let i=0;i<n;i++){
+        const q=Math.random();
+
+        const radius=
+            (1-q)*
+            (1-q)*
+            1.8;
+
+        const a=
+            Math.random()*
+            Math.PI*2;
+
+        position[i*3]=
+            Math.cos(a)*
+            radius;
+
+        position[i*3+1]=
+            -20.1+
+            q*6.3+
+            randomNormal()*.13;
+
+        position[i*3+2]=
+            Math.sin(a)*
+            radius*.45;
+
+        const c=
+            Math.random()<.5
+                ?new THREE.Color(
+                    1,.9,.97
+                )
+                :new THREE.Color(
+                    1,.36,.77
                 );
-        }
 
-        if (
-            beatTime > 0.20 &&
-            beatTime < 0.34
-        ) {
-            const t =
-                (beatTime - 0.20) /
-                0.14;
+        color[i*3]=c.r;
+        color[i*3+1]=c.g;
+        color[i*3+2]=c.b;
+    }
 
-            beat +=
-                0.58 *
-                Math.sin(
-                    t *
-                    Math.PI
+    const g=
+        new THREE.BufferGeometry();
+
+    g.setAttribute(
+        "position",
+        new THREE.BufferAttribute(
+            position,
+            3
+        )
+    );
+
+    g.setAttribute(
+        "color",
+        new THREE.BufferAttribute(
+            color,
+            3
+        )
+    );
+
+    const m=
+        new THREE.PointsMaterial({
+            size:.13,
+            vertexColors:true,
+            transparent:true,
+            opacity:.8,
+            depthWrite:false,
+            blending:
+                THREE.AdditiveBlending
+        });
+
+    const p=new THREE.Points(g,m);
+
+    p.position.y=2.2;
+
+    scene.add(p);
+
+    return p;
+}
+
+const fountain=
+    createFountain();
+
+/* ============================
+   FLOOR PARTICLE FIELD
+============================ */
+
+function createFloor(){
+    const positions=[];
+    const colors=[];
+
+    const rings=30;
+
+    for(let ring=1;ring<=rings;ring++){
+        const radius=
+            .85+
+            Math.pow(
+                ring/rings,
+                1.26
+            )*34;
+
+        const count=
+            Math.floor(
+                20+
+                radius*5.0
+            );
+
+        for(let j=0;j<count;j++){
+            const a=
+                j/count*
+                Math.PI*2+
+                (ring%2)*.035;
+
+            positions.push(
+                Math.cos(a)*radius,
+                -18.2,
+                Math.sin(a)*radius
+            );
+
+            const bright=
+                Math.max(
+                    .08,
+                    1-ring/rings
                 );
-        }
 
-        const slowBreath =
-            Math.sin(
-                time * 0.0013
-            ) *
-            0.012;
-
-        const heartbeat =
-            1 +
-            beat *
-            CONFIG.heartbeat +
-            slowBreath;
-
-        ctx.save();
-
-        ctx.globalCompositeOperation =
-            "lighter";
-
-        for (
-            let i = 0;
-            i < stars.length;
-            i++
-        ) {
-            stars[i].draw(time);
-        }
-
-        drawAura(
-            cx,
-            cy,
-            scale
-        );
-
-        for (
-            let i = 0;
-            i < rays.length;
-            i++
-        ) {
-            rays[i].update();
-
-            rays[i].draw(
-                time,
-                cx,
-                cy
+            colors.push(
+                .72+.28*bright,
+                .34+.38*bright,
+                .9
             );
         }
+    }
 
-        drawHeartOutline(
-            time,
-            cx,
-            cy,
-            scale,
-            heartbeat
+    while(
+        positions.length/3<
+        CONFIG.floorCount
+    ){
+        const radius=
+            Math.sqrt(
+                Math.random()
+            )*35;
+
+        const a=
+            Math.random()*
+            Math.PI*2;
+
+        positions.push(
+            Math.cos(a)*radius,
+            -18.2+
+            (Math.random()-.5)*.025,
+            Math.sin(a)*radius
         );
 
-        for (
-            let i = 0;
-            i < particles.length;
-            i++
-        ) {
-            particles[i].update(
-                time,
-                scale *
-                heartbeat,
-                cx,
-                cy
-            );
-
-            particles[i].draw(
-                time
-            );
-        }
-
-        drawGround(
-            time,
-            cx,
-            cy,
-            scale
-        );
-
-        ctx.restore();
-
-        ctx.globalAlpha = 1;
-
-        ctx.globalCompositeOperation =
-            "source-over";
-
-        requestAnimationFrame(
-            animate
+        colors.push(
+            .7,
+            .32,
+            .92
         );
     }
 
-    window.addEventListener(
-        "pointermove",
-        function(e) {
-            targetMouseX =
-                (
-                    e.clientX /
-                    W -
-                    0.5
-                ) * 2;
+    const g=
+        new THREE.BufferGeometry();
 
-            targetMouseY =
-                (
-                    e.clientY /
-                    H -
-                    0.5
-                ) * 2;
-        },
-        {
-            passive: true
-        }
+    g.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+            positions,
+            3
+        )
     );
 
-    window.addEventListener(
-        "pointerleave",
-        function() {
-            targetMouseX = 0;
-            targetMouseY = 0;
-        }
+    g.setAttribute(
+        "color",
+        new THREE.Float32BufferAttribute(
+            colors,
+            3
+        )
     );
 
-    let resizeTimer = null;
+    const m=
+        new THREE.PointsMaterial({
+            size:.055,
+            sizeAttenuation:true,
+            vertexColors:true,
+            transparent:true,
+            opacity:.33,
+            depthWrite:false,
+            blending:
+                THREE.AdditiveBlending
+        });
 
-    window.addEventListener(
-        "resize",
-        function() {
-            clearTimeout(
-                resizeTimer
+    const p=
+        new THREE.Points(g,m);
+
+    scene.add(p);
+
+    const lines=[];
+    const radialCount=42;
+
+    for(let i=0;i<radialCount;i++){
+        const a=
+            i/radialCount*
+            Math.PI*2;
+
+        lines.push(
+            0,-18.19,0,
+            Math.cos(a)*36,
+            -18.19,
+            Math.sin(a)*36
+        );
+    }
+
+    const lg=
+        new THREE.BufferGeometry();
+
+    lg.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+            lines,
+            3
+        )
+    );
+
+    const lm=
+        new THREE.LineBasicMaterial({
+            color:0xb16bd9,
+            transparent:true,
+            opacity:.055,
+            depthWrite:false,
+            blending:
+                THREE.AdditiveBlending
+        });
+
+    scene.add(
+        new THREE.LineSegments(
+            lg,
+            lm
+        )
+    );
+}
+
+createFloor();
+
+/* ============================
+   GROUND GLOW RINGS
+============================ */
+
+const groundRingGroup=
+    new THREE.Group();
+
+groundRingGroup.position.set(
+    0,
+    -18.05,
+    0
+);
+
+scene.add(
+    groundRingGroup
+);
+
+for(let i=0;i<7;i++){
+    const r=
+        1.25+
+        i*.73;
+
+    const points=[];
+
+    for(let j=0;j<130;j++){
+        const a=
+            j/130*
+            Math.PI*2;
+
+        points.push(
+            new THREE.Vector3(
+                Math.cos(a)*r,
+                0,
+                Math.sin(a)*r
+            )
+        );
+    }
+
+    const g=
+        new THREE.BufferGeometry()
+        .setFromPoints(
+            points
+        );
+
+    const m=
+        new THREE.LineBasicMaterial({
+            color:
+                i<2
+                    ?0xffd7ef
+                    :0xe177cf,
+
+            transparent:true,
+            opacity:
+                .30-i*.03,
+
+            blending:
+                THREE.AdditiveBlending,
+
+            depthWrite:false
+        });
+
+    groundRingGroup.add(
+        new THREE.LineLoop(
+            g,
+            m
+        )
+    );
+}
+
+/* ============================
+   BACKGROUND STARS
+============================ */
+
+function createStars(){
+    const n=
+        CONFIG.starCount;
+
+    const p=
+        new Float32Array(
+            n*3
+        );
+
+    const c=
+        new Float32Array(
+            n*3
+        );
+
+    for(let i=0;i<n;i++){
+        p[i*3]=
+            (Math.random()-.5)*95;
+
+        p[i*3+1]=
+            (Math.random()-.5)*64;
+
+        p[i*3+2]=
+            -8-
+            Math.random()*55;
+
+        const b=
+            .45+
+            Math.random()*.55;
+
+        c[i*3]=b;
+        c[i*3+1]=b*.63;
+        c[i*3+2]=b*.93;
+    }
+
+    const g=
+        new THREE.BufferGeometry();
+
+    g.setAttribute(
+        "position",
+        new THREE.BufferAttribute(
+            p,
+            3
+        )
+    );
+
+    g.setAttribute(
+        "color",
+        new THREE.BufferAttribute(
+            c,
+            3
+        )
+    );
+
+    const m=
+        new THREE.PointsMaterial({
+            size:.085,
+            vertexColors:true,
+            transparent:true,
+            opacity:.52,
+            depthWrite:false,
+            blending:
+                THREE.AdditiveBlending
+        });
+
+    const stars=
+        new THREE.Points(
+            g,
+            m
+        );
+
+    scene.add(stars);
+
+    return stars;
+}
+
+const stars=createStars();
+
+/* ============================
+   RADIAL LIGHT STREAKS
+============================ */
+
+function createRays(){
+    const verts=[];
+
+    for(let i=0;i<CONFIG.rayCount;i++){
+        const a=
+            Math.random()*
+            Math.PI*2;
+
+        const start=
+            16+
+            Math.random()*8;
+
+        const length=
+            3+
+            Math.random()*13;
+
+        const flatten=
+            .78;
+
+        verts.push(
+            Math.cos(a)*start,
+            Math.sin(a)*start*flatten+2,
+            -4-Math.random()*8,
+
+            Math.cos(a)*(start+length),
+            Math.sin(a)*(start+length)*flatten+2,
+            -4-Math.random()*8
+        );
+    }
+
+    const g=
+        new THREE.BufferGeometry();
+
+    g.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+            verts,
+            3
+        )
+    );
+
+    const m=
+        new THREE.LineBasicMaterial({
+            color:0xed78c8,
+            transparent:true,
+            opacity:.085,
+            blending:
+                THREE.AdditiveBlending,
+            depthWrite:false
+        });
+
+    const rays=
+        new THREE.LineSegments(
+            g,
+            m
+        );
+
+    scene.add(rays);
+
+    return rays;
+}
+
+const rays=createRays();
+
+/* ============================
+   MOUSE PARALLAX
+============================ */
+
+const pointer={
+    x:0,
+    y:0,
+    tx:0,
+    ty:0
+};
+
+window.addEventListener(
+    "pointermove",
+    e=>{
+        pointer.tx=
+            (
+                e.clientX/
+                innerWidth-
+                .5
+            )*2;
+
+        pointer.ty=
+            (
+                e.clientY/
+                innerHeight-
+                .5
+            )*2;
+    },
+    {passive:true}
+);
+
+window.addEventListener(
+    "pointerleave",
+    ()=>{
+        pointer.tx=0;
+        pointer.ty=0;
+    },
+    {passive:true}
+);
+
+/* ============================
+   RESIZE
+============================ */
+
+window.addEventListener(
+    "resize",
+    ()=>{
+        camera.aspect=
+            innerWidth/
+            innerHeight;
+
+        camera.fov=
+            innerWidth<768
+                ?58
+                :52;
+
+        camera.position.z=
+            innerWidth<768
+                ?54
+                :43;
+
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(
+            innerWidth,
+            innerHeight
+        );
+
+        composer.setSize(
+            innerWidth,
+            innerHeight
+        );
+    }
+);
+
+/* ============================
+   ANIMATION
+============================ */
+
+function heartbeat(t){
+    const cycle=
+        t%1.45;
+
+    let value=0;
+
+    if(cycle<.13){
+        value=
+            Math.sin(
+                cycle/.13*
+                Math.PI
             );
+    }
 
-            resizeTimer =
-                setTimeout(
-                    resize,
-                    150
-                );
-        }
-    );
+    if(
+        cycle>.18 &&
+        cycle<.31
+    ){
+        value+=
+            .48*
+            Math.sin(
+                (cycle-.18)/
+                .13*
+                Math.PI
+            );
+    }
 
-    resize();
+    return value;
+}
 
+let first=true;
+
+function animate(){
     requestAnimationFrame(
         animate
     );
-})();
-</script>
 
+    const t=
+        clock.getElapsedTime();
+
+    const beat=
+        heartbeat(t);
+
+    mainHeart.material.uniforms
+        .uTime.value=t;
+
+    mainHeart.material.uniforms
+        .uBeat.value=beat;
+
+    auraHeart.material.uniforms
+        .uTime.value=t;
+
+    auraHeart.material.uniforms
+        .uBeat.value=beat;
+
+    streams.material.uniforms
+        .uTime.value=t;
+
+    pointer.x+=
+        (pointer.tx-pointer.x)*
+        .025;
+
+    pointer.y+=
+        (pointer.ty-pointer.y)*
+        .025;
+
+    heartGroup.rotation.y=
+        pointer.x*.075+
+        Math.sin(t*.16)*.018;
+
+    heartGroup.rotation.x=
+        pointer.y*.035;
+
+    camera.position.x+=
+        (
+            pointer.x*.45-
+            camera.position.x
+        )*.025;
+
+    camera.position.y+=
+        (
+            2-
+            pointer.y*.25-
+            camera.position.y
+        )*.025;
+
+    camera.lookAt(
+        0,
+        .4,
+        0
+    );
+
+    auraHeart.points.rotation.z=
+        Math.sin(t*.10)*.006;
+
+    streams.points.rotation.z=
+        Math.sin(t*.13)*.004;
+
+    groundRingGroup.scale.setScalar(
+        1+
+        beat*.025+
+        Math.sin(t*1.2)*.008
+    );
+
+    fountain.rotation.y=
+        t*.05;
+
+    stars.rotation.z=
+        t*.002;
+
+    rays.rotation.z=
+        Math.sin(t*.08)*.006;
+
+    composer.render();
+
+    if(first){
+        first=false;
+
+        setTimeout(
+            ()=>{
+                document
+                    .getElementById(
+                        "loading"
+                    )
+                    .classList
+                    .add(
+                        "hide"
+                    );
+            },
+            450
+        );
+    }
+}
+
+animate();
+</script>
 </body>
 </html>
