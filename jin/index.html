@@ -6,1946 +6,2225 @@
 <title>Love</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#050209}
-body{
-    background:
-        radial-gradient(circle at 50% 34%,rgba(78,25,63,.18),transparent 38%),
-        #050209;
-}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .home{
-    position:fixed;z-index:10;left:22px;top:20px;
-    color:rgba(255,235,245,.25);text-decoration:none;
-    font:10px Arial,sans-serif;letter-spacing:3px;transition:.3s
+    position:fixed;
+    top:20px;
+    left:22px;
+    z-index:10;
+    color:rgba(255,235,245,.28);
+    text-decoration:none;
+    font:10px Arial,sans-serif;
+    letter-spacing:3px;
+    transition:.3s
 }
-.home:hover{color:#fff5fa;text-shadow:0 0 10px #ff8bc5}
+.home:hover{
+    color:#fff5fa;
+    text-shadow:0 0 10px #ff8bc5
+}
 </style>
-
-<script type="importmap">
-{
-  "imports":{
-    "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-  }
-}
-</script>
 </head>
 
 <body>
+
 <a class="home" href="/">HOME</a>
-
-<script type="module">
-import * as THREE from "three";
-import {EffectComposer} from "three/addons/postprocessing/EffectComposer.js";
-import {RenderPass} from "three/addons/postprocessing/RenderPass.js";
-import {UnrealBloomPass} from "three/addons/postprocessing/UnrealBloomPass.js";
-import {OutputPass} from "three/addons/postprocessing/OutputPass.js";
-
-const MOBILE=innerWidth<720;
-const DPR=Math.min(devicePixelRatio||1,MOBILE?1.25:1.7);
-
-const HEART_COUNT=MOBILE?24000:52000;
-const FLOW_COUNT=MOBILE?4500:11000;
-const BURST_COUNT=MOBILE?2200:5200;
-const STAR_COUNT=MOBILE?500:1200;
-
-const LOOP=10.2;
-const HEART_Y=2.5;
-const FLOOR_Y=-11.0;
-
-/* =========================================================
-   BASIC
-========================================================= */
-
-const scene=new THREE.Scene();
-scene.background=new THREE.Color(0x050209);
-scene.fog=new THREE.FogExp2(0x050209,.012);
-
-const camera=new THREE.PerspectiveCamera(
-    MOBILE?56:47,
-    innerWidth/innerHeight,
-    .1,
-    150
-);
-
-camera.position.set(0,4.1,MOBILE?43:38);
-camera.lookAt(0,.5,0);
-
-const renderer=new THREE.WebGLRenderer({
-    antialias:false,
-    powerPreference:"high-performance"
-});
-
-renderer.setPixelRatio(DPR);
-renderer.setSize(innerWidth,innerHeight);
-renderer.outputColorSpace=THREE.SRGBColorSpace;
-renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.03;
-
-document.body.appendChild(renderer.domElement);
-
-/* =========================================================
-   BLOOM
-   关键：收紧 Bloom，避免上一版“整颗心糊掉”
-========================================================= */
-
-const composer=new EffectComposer(renderer);
-
-composer.addPass(
-    new RenderPass(scene,camera)
-);
-
-const bloom=new UnrealBloomPass(
-    new THREE.Vector2(innerWidth,innerHeight),
-    .72,
-    .26,
-    .52
-);
-
-bloom.threshold=.52;
-bloom.strength=.72;
-bloom.radius=.26;
-
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
-
-/* =========================================================
-   GROUP
-========================================================= */
-
-const heartGroup=new THREE.Group();
-heartGroup.position.y=HEART_Y;
-scene.add(heartGroup);
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function randn(){
-    let u=0,v=0;
-    while(u===0)u=Math.random();
-    while(v===0)v=Math.random();
-
-    return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
-}
-
-function heartJS(t){
-    const s=Math.sin(t);
-
-    return [
-        16*s*s*s,
-        13*Math.cos(t)
-        -5*Math.cos(2*t)
-        -2*Math.cos(3*t)
-        -Math.cos(4*t)
-    ];
-}
-
-/* =========================================================
-   HEART DATA
-========================================================= */
-
-const heartPosition=new Float32Array(HEART_COUNT*3);
-const heartT=new Float32Array(HEART_COUNT);
-const radial=new Float32Array(HEART_COUNT);
-const band=new Float32Array(HEART_COUNT);
-const seed=new Float32Array(HEART_COUNT);
-const dir=new Float32Array(HEART_COUNT);
-const size=new Float32Array(HEART_COUNT);
-const edge=new Float32Array(HEART_COUNT);
-const brightness=new Float32Array(HEART_COUNT);
-
-for(let i=0;i<HEART_COUNT;i++){
-
-    const t=Math.random()*Math.PI*2;
-
-    const mode=Math.random();
-
-    let r;
-    let e;
-
-    /*
-     * 绝大部分粒子集中在边缘，
-     * 少部分散布内部。
-     */
-
-    if(mode<.64){
-        r=.92+Math.random()*.11;
-        e=.92+Math.random()*.08;
-    }else if(mode<.84){
-        r=.72+Math.random()*.25;
-        e=.55+Math.random()*.28;
-    }else{
-        r=.18+Math.pow(Math.random(),.55)*.67;
-        e=.10+Math.random()*.35;
-    }
-
-    heartT[i]=t;
-    radial[i]=r;
-
-    band[i]=
-        mode<.64
-        ?randn()*.20
-        :randn()*.32;
-
-    seed[i]=Math.random();
-
-    dir[i]=Math.random()<.5?-1:1;
-
-    const q=Math.random();
-
-    size[i]=
-        q<.84
-        ?.038+Math.random()*.050
-        :q<.985
-        ?.085+Math.random()*.060
-        :.16+Math.random()*.10;
-
-    edge[i]=e;
-
-    brightness[i]=Math.random();
-}
-
-const heartGeo=new THREE.BufferGeometry();
-
-heartGeo.setAttribute(
-    "position",
-    new THREE.BufferAttribute(
-        heartPosition,
-        3
-    )
-);
-
-heartGeo.setAttribute(
-    "aT",
-    new THREE.BufferAttribute(heartT,1)
-);
-
-heartGeo.setAttribute(
-    "aRadial",
-    new THREE.BufferAttribute(radial,1)
-);
-
-heartGeo.setAttribute(
-    "aBand",
-    new THREE.BufferAttribute(band,1)
-);
-
-heartGeo.setAttribute(
-    "aSeed",
-    new THREE.BufferAttribute(seed,1)
-);
-
-heartGeo.setAttribute(
-    "aDir",
-    new THREE.BufferAttribute(dir,1)
-);
-
-heartGeo.setAttribute(
-    "aSize",
-    new THREE.BufferAttribute(size,1)
-);
-
-heartGeo.setAttribute(
-    "aEdge",
-    new THREE.BufferAttribute(edge,1)
-);
-
-heartGeo.setAttribute(
-    "aBrightness",
-    new THREE.BufferAttribute(brightness,1)
-);
-
-/* =========================================================
-   HEART SHADER
-========================================================= */
-
-const heartVertex=`
-#define PI 3.141592653589793
-#define TAU 6.283185307179586
-
-attribute float aT;
-attribute float aRadial;
-attribute float aBand;
-attribute float aSeed;
-attribute float aDir;
-attribute float aSize;
-attribute float aEdge;
-attribute float aBrightness;
-
-uniform float uTime;
-uniform float uPixelRatio;
-
-varying vec3 vColor;
-varying float vAlpha;
-varying float vHot;
-
-float ease5(float x){
-    x=clamp(x,0.0,1.0);
-    return x*x*x*(x*(x*6.0-15.0)+10.0);
-}
-
-float window(float x,float a,float b,float c,float d){
-    return ease5((x-a)/(b-a))*
-           (1.0-ease5((x-c)/(d-c)));
-}
-
-float bell(float x,float c,float w){
-    float q=(x-c)/w;
-    return exp(-q*q);
-}
-
-mat2 rot(float a){
-    float c=cos(a);
-    float s=sin(a);
-    return mat2(c,-s,s,c);
-}
-
-vec2 heart(float t){
-    float s=sin(t);
-
-    return vec2(
-        16.0*s*s*s,
-        13.0*cos(t)
-        -5.0*cos(2.0*t)
-        -2.0*cos(3.0*t)
-        -cos(4.0*t)
-    )*.64;
-}
-
-vec2 heartD(float t){
-
-    float s=sin(t);
-    float c=cos(t);
-
-    return vec2(
-        48.0*s*s*c,
-        -13.0*sin(t)
-        +10.0*sin(2.0*t)
-        +6.0*sin(3.0*t)
-        +4.0*sin(4.0*t)
-    )*.64;
-}
-
-void main(){
-
-    float ph=mod(uTime,${LOOP.toFixed(3)});
-
-    /*
-     * ---------------------------------------------
-     * 粒子不是固定在心形上：
-     * 每个粒子持续沿心形切向运动。
-     * ---------------------------------------------
-     */
-
-    float flowSpeed=
-        .030+
-        aSeed*.050;
-
-    float t=
-        aT+
-        uTime*
-        flowSpeed*
-        aDir;
-
-    vec2 hp=heart(t);
-
-    vec2 tangent=
-        normalize(
-            heartD(t)
-        );
-
-    vec2 normal=
-        vec2(
-            -tangent.y,
-            tangent.x
-        );
-
-    /*
-     * 不同频率扰动，
-     * 让轮廓永远不是死的。
-     */
-
-    float n1=
-        sin(
-            t*9.0+
-            uTime*1.18+
-            aSeed*27.0
-        );
-
-    float n2=
-        sin(
-            t*19.0-
-            uTime*.72+
-            aSeed*43.0
-        );
-
-    float n3=
-        cos(
-            t*31.0+
-            uTime*.38+
-            aSeed*13.0
-        );
-
-    float thickness=
-        aBand+
-        n1*.12+
-        n2*.050+
-        n3*.022;
-
-    vec2 h=
-        hp*aRadial+
-        normal*thickness;
-
-    /*
-     * 正常呼吸 + 双心跳
-     */
-
-    float cycle=
-        mod(uTime,1.50);
-
-    float beat=
-        bell(cycle,.11,.060)+
-        .46*bell(cycle,.27,.067);
-
-    float breathe=
-        1.0+
-        sin(uTime*.74)*.0045+
-        beat*.016;
-
-    h*=breathe;
-
-    /*
-     * ---------------------------------------------
-     * 整体侧转
-     *
-     * 不是线性转动，
-     * 加轻微过冲和回弹。
-     * ---------------------------------------------
-     */
-
-    float side=
-        window(
-            ph,
-            3.20,
-            4.30,
-            7.10,
-            8.45
-        );
-
-    float sideAngle=
-        side*
-        (
-            1.31+
-            .085*
-            sin(
-                (ph-3.2)*3.1
-            )
-        );
-
-    /*
-     * ---------------------------------------------
-     * 错峰坍缩
-     *
-     * 每个粒子根据 aSeed 在不同时间进入能量柱。
-     * 解决“整个心一起缩”带来的机械感。
-     * ---------------------------------------------
-     */
-
-    float collapseStart=
-        4.55+
-        aSeed*.58;
-
-    float collapse=
-        ease5(
-            (
-                ph-
-                collapseStart
-            )/
-            .82
-        );
-
-    float reformStart=
-        6.15+
-        (1.0-aSeed)*.62;
-
-    float reform=
-        ease5(
-            (
-                ph-
-                reformStart
-            )/
-            .92
-        );
-
-    float shape=
-        clamp(
-            1.0-
-            collapse+
-            reform,
-            0.0,
-            1.0
-        );
-
-    /*
-     * Heart 3D depth
-     */
-
-    float z=
-        (
-            aSeed-.5
-        )*
-        (
-            .7+
-            (1.0-aEdge)*2.1
-        );
-
-    vec3 heartPos=
-        vec3(
-            h,
-            z
-        );
-
-    heartPos.xz=
-        rot(sideAngle)*
-        heartPos.xz;
-
-    /*
-     * ---------------------------------------------
-     * Helix column
-     * ---------------------------------------------
-     */
-
-    float columnY=
-        mix(
-            -8.5,
-            8.0,
-            fract(
-                aSeed*7.381+
-                aT*.31
-            )
-        );
-
-    float columnAngle=
-        aSeed*TAU*5.0+
-        uTime*
-        (
-            1.0+
-            aSeed*.55
-        );
-
-    float columnRadius=
-        .15+
-        aEdge*.32+
-        .11*
-        sin(
-            columnY*.70-
-            uTime*2.3+
-            aSeed*30.0
-        );
-
-    vec3 columnPos=
-        vec3(
-            cos(columnAngle)*
-            columnRadius,
-
-            columnY,
-
-            sin(columnAngle)*
-            columnRadius
-        );
-
-    /*
-     * 柱体自身上下流动
-     */
-
-    columnPos.y+=
-        sin(
-            uTime*1.5+
-            aSeed*19.0
-        )*.28;
-
-    vec3 p=
-        mix(
-            columnPos,
-            heartPos,
-            shape
-        );
-
-    /*
-     * ---------------------------------------------
-     * 重组后的冲击波
-     * ---------------------------------------------
-     */
-
-    float shock=
-        bell(
-            ph,
-            8.30,
-            .27
-        );
-
-    vec3 direction=
-        normalize(
-            vec3(
-                heartPos.xy,
-                heartPos.z*.35
-            )+
-            vec3(.0001)
-        );
-
-    p+=
-        direction*
-        shock*
-        (
-            .08+
-            aSeed*.48
-        );
-
-    /*
-     * 局部漂移
-     */
-
-    p.z+=
-        sin(
-            uTime*.86+
-            aSeed*24.0+
-            t*3.0
-        )*
-        .055;
-
-    vec4 mv=
-        modelViewMatrix*
-        vec4(
-            p,
-            1.0
-        );
-
-    float perspective=
-        56.0/
-        max(
-            7.0,
-            -mv.z
-        );
-
-    /*
-     * 粒径必须小。
-     */
-
-    gl_PointSize=
-        clamp(
-            aSize*
-            uPixelRatio*
-            perspective,
-            .48,
-            3.2
-        );
-
-    gl_Position=
-        projectionMatrix*
-        mv;
-
-    /*
-     * ---------------------------------------------
-     * 颜色
-     *
-     * 去掉“满屏紫”
-     * ---------------------------------------------
-     */
-
-    vec3 darkPink=
-        vec3(
-            .86,
-            .36,
-            .62
-        );
-
-    vec3 pink=
-        vec3(
-            1.0,
-            .56,
-            .76
-        );
-
-    vec3 pale=
-        vec3(
-            1.0,
-            .82,
-            .91
-        );
-
-    vec3 white=
-        vec3(
-            1.18,
-            1.10,
-            1.14
-        );
-
-    vec3 col=
-        mix(
-            darkPink,
-            pink,
-            aEdge
-        );
-
-    col=
-        mix(
-            col,
-            pale,
-            aEdge*.62
-        );
-
-    /*
-     * 极少数 HDR 高亮点，
-     * 只让它们进入 Bloom。
-     */
-
-    float hot=
-        smoothstep(
-            .965,
-            1.0,
-            aBrightness
-        );
-
-    hot+=
-        shock*
-        smoothstep(
-            .72,
-            1.0,
-            aEdge
-        )*.52;
-
-    hot=clamp(hot,0.0,1.0);
-
-    col=
-        mix(
-            col,
-            white,
-            hot
-        );
-
-    /*
-     * 内部粒子明显暗，
-     * 轮廓粒子亮。
-     */
-
-    float alpha=
-        mix(
-            .12,
-            .82,
-            aEdge
-        );
-
-    alpha*=
-        .76+
-        .24*
-        sin(
-            uTime*
-            (
-                1.2+
-                aSeed*2.0
-            )+
-            aSeed*31.0
-        );
-
-    /*
-     * 柱状态稍暗，
-     * 避免烧成白柱。
-     */
-
-    alpha*=
-        mix(
-            .62,
-            1.0,
-            shape
-        );
-
-    vColor=col;
-    vAlpha=alpha;
-    vHot=hot;
-}
-`;
-
-const heartFragment=`
-precision highp float;
-
-varying vec3 vColor;
-varying float vAlpha;
-varying float vHot;
-
-void main(){
-
-    vec2 uv=
-        gl_PointCoord-.5;
-
-    float d=
-        length(uv);
-
-    if(d>.5)
-        discard;
-
-    /*
-     * 非常硬的小核心。
-     */
-
-    float core=
-        exp(
-            -d*d*62.0
-        );
-
-    /*
-     * halo 极弱。
-     */
-
-    float halo=
-        exp(
-            -d*d*15.0
-        )*.065;
-
-    float alpha=
-        (
-            core+
-            halo
-        )*
-        vAlpha;
-
-    vec3 col=
-        vColor*
-        (
-            1.0+
-            vHot*.38
-        );
-
-    gl_FragColor=
-        vec4(
-            col,
-            alpha
-        );
-}
-`;
-
-const heartMaterial=
-    new THREE.ShaderMaterial({
-        vertexShader:heartVertex,
-        fragmentShader:heartFragment,
-
-        uniforms:{
-            uTime:{value:0},
-            uPixelRatio:{value:DPR}
-        },
-
-        transparent:true,
-        depthWrite:false,
-        depthTest:true,
-        blending:THREE.AdditiveBlending
-    });
-
-const heartPoints=
-    new THREE.Points(
-        heartGeo,
-        heartMaterial
-    );
-
-heartPoints.frustumCulled=false;
-heartGroup.add(heartPoints);
-
-/* =========================================================
-   OUTER FLOW
-   外围不再使用直射线。
-   变成真正围绕心形高速穿梭的流。
-========================================================= */
-
-const flowGeo=
-    new THREE.BufferGeometry();
-
-const flowPos=
-    new Float32Array(
-        FLOW_COUNT*3
-    );
-
-const flowSeed=
-    new Float32Array(
-        FLOW_COUNT
-    );
-
-const flowOffset=
-    new Float32Array(
-        FLOW_COUNT
-    );
-
-const flowSize=
-    new Float32Array(
-        FLOW_COUNT
-    );
-
-const flowDir=
-    new Float32Array(
-        FLOW_COUNT
-    );
-
-for(let i=0;i<FLOW_COUNT;i++){
-
-    flowSeed[i]=Math.random();
-
-    flowOffset[i]=
-        .45+
-        Math.pow(
-            Math.random(),
-            .7
-        )*2.7;
-
-    flowSize[i]=
-        .035+
-        Math.random()*.055;
-
-    flowDir[i]=
-        Math.random()<.5
-        ?-1
-        :1;
-}
-
-flowGeo.setAttribute(
-    "position",
-    new THREE.BufferAttribute(
-        flowPos,
-        3
-    )
-);
-
-flowGeo.setAttribute(
-    "aSeed",
-    new THREE.BufferAttribute(
-        flowSeed,
-        1
-    )
-);
-
-flowGeo.setAttribute(
-    "aOffset",
-    new THREE.BufferAttribute(
-        flowOffset,
-        1
-    )
-);
-
-flowGeo.setAttribute(
-    "aSize",
-    new THREE.BufferAttribute(
-        flowSize,
-        1
-    )
-);
-
-flowGeo.setAttribute(
-    "aDir",
-    new THREE.BufferAttribute(
-        flowDir,
-        1
-    )
-);
-
-const flowVertex=`
-#define TAU 6.283185307179586
-
-attribute float aSeed;
-attribute float aOffset;
-attribute float aSize;
-attribute float aDir;
-
-uniform float uTime;
-uniform float uPixelRatio;
-
-varying float vAlpha;
-varying vec3 vColor;
-
-vec2 heart(float t){
-    float s=sin(t);
-
-    return vec2(
-        16.0*s*s*s,
-        13.0*cos(t)
-        -5.0*cos(2.0*t)
-        -2.0*cos(3.0*t)
-        -cos(4.0*t)
-    )*.64;
-}
-
-vec2 heartD(float t){
-
-    float s=sin(t);
-    float c=cos(t);
-
-    return vec2(
-        48.0*s*s*c,
-
-        -13.0*sin(t)
-        +10.0*sin(2.0*t)
-        +6.0*sin(3.0*t)
-        +4.0*sin(4.0*t)
-    )*.64;
-}
-
-void main(){
-
-    float ph=
-        mod(
-            uTime,
-            ${LOOP.toFixed(3)}
-        );
-
-    /*
-     * 粒子高速绕心流动
-     */
-
-    float t=
-        aSeed*TAU+
-        uTime*
-        (
-            .10+
-            aSeed*.12
-        )*
-        aDir;
-
-    vec2 hp=heart(t);
-
-    vec2 tangent=
-        normalize(
-            heartD(t)
-        );
-
-    vec2 normal=
-        vec2(
-            -tangent.y,
-            tangent.x
-        );
-
-    /*
-     * 外围不是一个固定圈。
-     */
-
-    float wave=
-        sin(
-            t*5.0-
-            uTime*1.8+
-            aSeed*18.0
-        )*.46+
-
-        sin(
-            t*13.0+
-            uTime*.8+
-            aSeed*37.0
-        )*.17;
-
-    float offset=
-        aOffset+
-        wave;
-
-    vec2 p2=
-        hp+
-        normal*offset;
-
-    /*
-     * 切向拖曳。
-     */
-
-    p2+=
-        tangent*
-        sin(
-            uTime*2.1+
-            aSeed*25.0
-        )*.20;
-
-    float z=
-        sin(
-            aSeed*TAU*4.0+
-            uTime*
-            (
-                .65+
-                aSeed
-            )
-        )*
-        (
-            .5+
-            aOffset*.50
-        );
-
-    /*
-     * 坍缩期间外围粒子向中间形成旋涡。
-     */
-
-    float collapse=
-        smoothstep(
-            4.55,
-            5.55,
-            ph
-        )*
-        (
-            1.0-
-            smoothstep(
-                6.15,
-                7.30,
-                ph
-            )
-        );
-
-    float angle=
-        aSeed*TAU*4.0+
-        uTime*2.15;
-
-    vec3 vortex=
-        vec3(
-            cos(angle)*
-            (
-                .4+
-                aOffset*.36
-            ),
-
-            mix(
-                -8.5,
-                8.0,
-                fract(
-                    aSeed*4.7+
-                    uTime*.06
-                )
-            ),
-
-            sin(angle)*
-            (
-                .4+
-                aOffset*.36
-            )
-        );
-
-    vec3 p=
-        mix(
-            vec3(
-                p2,
-                z
-            ),
-            vortex,
-            collapse
-        );
-
-    vec4 mv=
-        modelViewMatrix*
-        vec4(
-            p,
-            1
-        );
-
-    gl_PointSize=
-        clamp(
-            aSize*
-            uPixelRatio*
-            55.0/
-            max(
-                7.0,
-                -mv.z
-            ),
-            .45,
-            2.2
-        );
-
-    gl_Position=
-        projectionMatrix*
-        mv;
-
-    float near=
-        1.0-
-        clamp(
-            aOffset/3.2,
-            0.0,
-            1.0
-        );
-
-    vColor=
-        mix(
-            vec3(
-                .78,
-                .31,
-                .57
-            ),
-            vec3(
-                1.0,
-                .72,
-                .86
-            ),
-            near
-        );
-
-    vAlpha=
-        (
-            .08+
-            near*.40
-        )*
-        (
-            .65+
-            .35*
-            sin(
-                uTime*2.0+
-                aSeed*35.0
-            )
-        );
-}
-`;
-
-const flowFragment=`
-precision highp float;
-
-varying float vAlpha;
-varying vec3 vColor;
-
-void main(){
-
-    vec2 p=
-        gl_PointCoord-.5;
-
-    float d=
-        length(p);
-
-    if(d>.5)
-        discard;
-
-    gl_FragColor=
-        vec4(
-            vColor,
-            exp(
-                -d*d*46.0
-            )*
-            vAlpha
-        );
-}
-`;
-
-const flowMaterial=
-    new THREE.ShaderMaterial({
-        vertexShader:flowVertex,
-        fragmentShader:flowFragment,
-
-        uniforms:{
-            uTime:{value:0},
-            uPixelRatio:{value:DPR}
-        },
-
-        transparent:true,
-        depthWrite:false,
-        blending:THREE.AdditiveBlending
-    });
-
-const flowPoints=
-    new THREE.Points(
-        flowGeo,
-        flowMaterial
-    );
-
-flowPoints.frustumCulled=false;
-heartGroup.add(flowPoints);
-
-/* =========================================================
-   CURVED BURST
-========================================================= */
-
-const burstGeo=
-    new THREE.BufferGeometry();
-
-const burstSource=
-    new Float32Array(BURST_COUNT*3);
-
-const burstDir=
-    new Float32Array(BURST_COUNT*3);
-
-const burstSeed=
-    new Float32Array(BURST_COUNT);
-
-const burstLen=
-    new Float32Array(BURST_COUNT);
-
-const burstSize=
-    new Float32Array(BURST_COUNT);
-
-for(let i=0;i<BURST_COUNT;i++){
-
-    const t=
-        Math.random()*
-        Math.PI*2;
-
-    const [hx,hy]=
-        heartJS(t);
-
-    const x=hx*.64;
-    const y=hy*.64;
-
-    const l=Math.hypot(x,y)||1;
-
-    let dx=x/l;
-    let dy=y/l;
-
-    const tangent=
-        (Math.random()-.5)*.5;
-
-    const tx=-dy;
-    const ty=dx;
-
-    dx+=tx*tangent;
-    dy+=ty*tangent;
-
-    const j=i*3;
-
-    burstSource[j]=x+randn()*.15;
-    burstSource[j+1]=y+randn()*.15;
-    burstSource[j+2]=randn()*.45;
-
-    burstDir[j]=dx;
-    burstDir[j+1]=dy;
-    burstDir[j+2]=randn()*.18;
-
-    burstSeed[i]=Math.random();
-
-    burstLen[i]=
-        3+
-        Math.pow(
-            Math.random(),
-            .52
-        )*15;
-
-    burstSize[i]=
-        .035+
-        Math.random()*.055;
-}
-
-burstGeo.setAttribute(
-    "position",
-    new THREE.BufferAttribute(
-        new Float32Array(
-            BURST_COUNT*3
-        ),
-        3
-    )
-);
-
-burstGeo.setAttribute(
-    "aSource",
-    new THREE.BufferAttribute(
-        burstSource,
-        3
-    )
-);
-
-burstGeo.setAttribute(
-    "aDir",
-    new THREE.BufferAttribute(
-        burstDir,
-        3
-    )
-);
-
-burstGeo.setAttribute(
-    "aSeed",
-    new THREE.BufferAttribute(
-        burstSeed,
-        1
-    )
-);
-
-burstGeo.setAttribute(
-    "aLength",
-    new THREE.BufferAttribute(
-        burstLen,
-        1
-    )
-);
-
-burstGeo.setAttribute(
-    "aSize",
-    new THREE.BufferAttribute(
-        burstSize,
-        1
-    )
-);
-
-const burstVertex=`
-attribute vec3 aSource;
-attribute vec3 aDir;
-attribute float aSeed;
-attribute float aLength;
-attribute float aSize;
-
-uniform float uTime;
-uniform float uPixelRatio;
-
-varying float vAlpha;
-varying vec3 vColor;
-
-void main(){
-
-    float ph=
-        mod(
-            uTime,
-            ${LOOP.toFixed(3)}
-        );
-
-    float q=
-        clamp(
-            (
-                ph-
-                8.05
-            )/
-            1.28,
-            0.0,
-            1.0
-        );
-
-    float motion=
-        pow(
-            q,
-            .63
-        );
-
-    vec3 p=
-        aSource+
-        aDir*
-        aLength*
-        motion;
-
-    /*
-     * 爆射不是直线。
-     */
-
-    float bend=
-        sin(
-            q*3.14159
-        )*
-        aLength*
-        (
-            .03+
-            .07*aSeed
-        );
-
-    p.x+=
-        -aDir.y*
-        bend;
-
-    p.y+=
-        aDir.x*
-        bend;
-
-    p.z+=
-        sin(
-            q*9.0+
-            aSeed*24.0
-        )*
-        bend*.32;
-
-    vec4 mv=
-        modelViewMatrix*
-        vec4(
-            p,
-            1.0
-        );
-
-    gl_PointSize=
-        clamp(
-            aSize*
-            uPixelRatio*
-            56.0/
-            max(
-                7.0,
-                -mv.z
-            ),
-            .45,
-            2.5
-        );
-
-    gl_Position=
-        projectionMatrix*
-        mv;
-
-    float fade=
-        smoothstep(
-            0.0,
-            .08,
-            q
-        )*
-        (
-            1.0-
-            smoothstep(
-                .42,
-                1.0,
-                q
-            )
-        );
-
-    float hot=
-        smoothstep(
-            .94,
-            1.0,
-            aSeed
-        );
-
-    vColor=
-        mix(
-            vec3(
-                1.0,
-                .49,
-                .72
-            ),
-            vec3(
-                1.12,
-                1.04,
-                1.08
-            ),
-            hot
-        );
-
-    vAlpha=
-        fade*
-        (
-            .25+
-            aSeed*.58
-        );
-}
-`;
-
-const burstFrag=`
-precision highp float;
-
-varying float vAlpha;
-varying vec3 vColor;
-
-void main(){
-
-    vec2 p=
-        gl_PointCoord-.5;
-
-    float d=
-        length(p);
-
-    if(d>.5)discard;
-
-    gl_FragColor=
-        vec4(
-            vColor,
-            exp(-d*d*50.0)*
-            vAlpha
-        );
-}
-`;
-
-const burstMaterial=
-    new THREE.ShaderMaterial({
-        vertexShader:burstVertex,
-        fragmentShader:burstFrag,
-
-        uniforms:{
-            uTime:{value:0},
-            uPixelRatio:{value:DPR}
-        },
-
-        transparent:true,
-        depthWrite:false,
-        blending:THREE.AdditiveBlending
-    });
-
-const burstPoints=
-    new THREE.Points(
-        burstGeo,
-        burstMaterial
-    );
-
-burstPoints.position.y=HEART_Y;
-burstPoints.frustumCulled=false;
-scene.add(burstPoints);
-
-/* =========================================================
-   FLOOR
-========================================================= */
-
-const floorGroup=new THREE.Group();
-scene.add(floorGroup);
-
-const floorLines=[];
-const ringCount=MOBILE?17:24;
-
-for(let r=1;r<=ringCount;r++){
-
-    const q=r/ringCount;
-
-    const radius=
-        .5+
-        Math.pow(q,1.32)*19;
-
-    const segments=150;
-
-    for(let i=0;i<segments;i++){
-
-        const a=i/segments*Math.PI*2;
-        const b=(i+1)/segments*Math.PI*2;
-
-        const w1=
-            1+
-            (.10*(1-q)+.015)*
-            Math.sin(a*10+r*.43);
-
-        const w2=
-            1+
-            (.10*(1-q)+.015)*
-            Math.sin(b*10+r*.43);
-
-        floorLines.push(
-            Math.cos(a)*radius*w1,
-            FLOOR_Y,
-            Math.sin(a)*radius*w1,
-
-            Math.cos(b)*radius*w2,
-            FLOOR_Y,
-            Math.sin(b)*radius*w2
-        );
-    }
-}
-
-const spokes=MOBILE?38:54;
-
-for(let i=0;i<spokes;i++){
-
-    const a=
-        i/spokes*
-        Math.PI*2;
-
-    floorLines.push(
-        0,FLOOR_Y,0,
-        Math.cos(a)*20,
-        FLOOR_Y,
-        Math.sin(a)*20
-    );
-}
-
-const floorGeo=
-    new THREE.BufferGeometry();
-
-floorGeo.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(
-        floorLines,
-        3
-    )
-);
-
-const floorMat=
-    new THREE.LineBasicMaterial({
-        color:0xc072ba,
-        transparent:true,
-        opacity:.075,
-        depthWrite:false,
-        blending:THREE.AdditiveBlending
-    });
-
-floorGroup.add(
-    new THREE.LineSegments(
-        floorGeo,
-        floorMat
-    )
-);
-
-/* center rings */
-
-const centerRings=
-    new THREE.Group();
-
-centerRings.position.y=
-    FLOOR_Y+.02;
-
-for(let i=0;i<6;i++){
-
-    const r=
-        .55+
-        i*.55;
-
-    const points=[];
-
-    for(let j=0;j<128;j++){
-
-        const a=
-            j/128*
-            Math.PI*2;
-
-        points.push(
-            new THREE.Vector3(
-                Math.cos(a)*r,
-                0,
-                Math.sin(a)*r
-            )
-        );
-    }
-
-    const g=
-        new THREE.BufferGeometry()
-        .setFromPoints(points);
-
-    const m=
-        new THREE.LineBasicMaterial({
-            color:i<2?0xffd7ec:0xdf83c2,
-            transparent:true,
-            opacity:.24-i*.026,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        });
-
-    centerRings.add(
-        new THREE.LineLoop(g,m)
-    );
-}
-
-floorGroup.add(centerRings);
-
-/* =========================================================
-   STARS
-========================================================= */
-
-const starPos=
-    new Float32Array(
-        STAR_COUNT*3
-    );
-
-const starCol=
-    new Float32Array(
-        STAR_COUNT*3
-    );
-
-for(let i=0;i<STAR_COUNT;i++){
-
-    starPos[i*3]=
-        (Math.random()-.5)*90;
-
-    starPos[i*3+1]=
-        (Math.random()-.5)*60+3;
-
-    starPos[i*3+2]=
-        -10-Math.random()*48;
-
-    const b=.18+Math.random()*.40;
-
-    starCol[i*3]=b;
-    starCol[i*3+1]=b*.46;
-    starCol[i*3+2]=b*.72;
-}
-
-const starGeo=
-    new THREE.BufferGeometry();
-
-starGeo.setAttribute(
-    "position",
-    new THREE.BufferAttribute(
-        starPos,
-        3
-    )
-);
-
-starGeo.setAttribute(
-    "color",
-    new THREE.BufferAttribute(
-        starCol,
-        3
-    )
-);
-
-const starPoints=
-    new THREE.Points(
-        starGeo,
-        new THREE.PointsMaterial({
-            size:.055,
-            vertexColors:true,
-            transparent:true,
-            opacity:.48,
-            depthWrite:false,
-            blending:THREE.AdditiveBlending
-        })
-    );
-
-scene.add(starPoints);
-
-/* =========================================================
-   POINTER
-========================================================= */
-
-const pointer={
-    x:0,
-    y:0,
-    tx:0,
-    ty:0
+<canvas id="c"></canvas>
+
+<script>
+(()=>{
+"use strict";
+
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d",{alpha:false});
+
+const TAU=Math.PI*2;
+const LOOP=14.6;
+
+let W=0;
+let H=0;
+let DPR=1;
+let scale=1;
+let cx=0;
+let cy=0;
+let floorY=0;
+
+let last=performance.now();
+let frameNo=0;
+let resizeTimer=null;
+
+let contour=[];
+let edge=[];
+let center=[];
+let floorDots=[];
+let stream=[];
+let rays=[];
+let stars=[];
+
+const CFG={
+    contourDesktop:2200,
+    contourMobile:1200,
+    centerDesktop:10000,
+    centerMobile:4600,
+
+    haloBaseDesktop:3000,
+    haloBaseMobile:1500,
+
+    haloExtraDesktop:4000,
+    haloExtraMobile:1900
 };
 
-addEventListener(
-    "pointermove",
-    e=>{
-        pointer.tx=
-            (e.clientX/innerWidth-.5)*2;
+function mobile(){
+    return W<720;
+}
 
-        pointer.ty=
-            (e.clientY/innerHeight-.5)*2;
-    },
-    {passive:true}
-);
+function rand(a,b){
+    return a+Math.random()*(b-a);
+}
 
-addEventListener(
-    "pointerleave",
-    ()=>{
-        pointer.tx=0;
-        pointer.ty=0;
-    },
-    {passive:true}
-);
+function clamp(v,a,b){
+    return Math.max(a,Math.min(b,v));
+}
+
+function fract(v){
+    return v-Math.floor(v);
+}
+
+function smooth(v){
+    v=clamp(v,0,1);
+    return v*v*(3-2*v);
+}
+
+function easeInOut(v){
+    v=clamp(v,0,1);
+
+    return v<.5
+        ?4*v*v*v
+        :1-Math.pow(-2*v+2,3)/2;
+}
+
+function gauss(){
+    return (
+        Math.random()+
+        Math.random()+
+        Math.random()+
+        Math.random()-
+        2
+    );
+}
+
+/*
+ * 快速伪随机：
+ * 用于每帧 ±1px 抖动。
+ */
+function hash01(i,f,s=0){
+
+    let h=
+        (
+            Math.imul(
+                (i+1+s)|0,
+                374761393
+            )+
+            Math.imul(
+                (f+1)|0,
+                668265263
+            )
+        )|0;
+
+    h=h^(h>>>13);
+
+    h=Math.imul(
+        h,
+        1274126177
+    );
+
+    return (
+        (
+            h^(h>>>16)
+        )>>>0
+    )/4294967296;
+}
 
 /* =========================================================
-   RESIZE
+   经典爱心函数
 ========================================================= */
+
+function heart(t,s=1){
+
+    const q=Math.sin(t);
+
+    return {
+        x:
+            16*
+            q*q*q*
+            s,
+
+        y:
+            -(
+                13*Math.cos(t)
+                -5*Math.cos(2*t)
+                -2*Math.cos(3*t)
+                -Math.cos(4*t)
+            )*
+            s
+    };
+}
+
+/*
+ * 对应 Python:
+ *
+ * ratio_x = -beta * log(random())
+ * ratio_y = -beta * log(random())
+ *
+ * 这是目标视频里很关键的内部扩散。
+ */
+function scatterInside(x,y,beta){
+
+    const rx=
+        -beta*
+        Math.log(
+            Math.max(
+                1e-6,
+                Math.random()
+            )
+        );
+
+    const ry=
+        -beta*
+        Math.log(
+            Math.max(
+                1e-6,
+                Math.random()
+            )
+        );
+
+    return {
+        x:x-rx*x,
+        y:y-ry*y
+    };
+}
+
+/*
+ * 预计算：
+ *
+ * force =
+ * 1 / ((x*x + y*y) ** 0.420)
+ *
+ * 后面每帧只需要：
+ *
+ * x - ratio * fx
+ */
+function makePoint(
+    x,
+    y,
+    z,
+    size,
+    seed
+){
+
+    const r2=
+        Math.max(
+            16,
+            x*x+y*y
+        );
+
+    const force=
+        1/
+        Math.pow(
+            r2,
+            .420
+        );
+
+    return {
+        x,
+        y,
+        z,
+
+        fx:force*x,
+        fy:force*y,
+
+        size,
+        seed
+    };
+}
+
+/* =========================================================
+   构建爱心
+========================================================= */
+
+function buildHeart(){
+
+    contour=[];
+    edge=[];
+    center=[];
+
+    const n=
+        mobile()
+        ?CFG.contourMobile
+        :CFG.contourDesktop;
+
+    const centerN=
+        mobile()
+        ?CFG.centerMobile
+        :CFG.centerDesktop;
+
+    /*
+     * 第一层：2000 左右原始轮廓点
+     */
+    for(let i=0;i<n;i++){
+
+        const t=
+            Math.random()*
+            TAU;
+
+        const p=
+            heart(
+                t,
+                scale
+            );
+
+        const q=
+            Math.random();
+
+        const size=
+            q<.72
+            ?1
+            :q<.93
+            ?1.5
+            :2;
+
+        contour.push(
+            makePoint(
+                p.x,
+                p.y,
+                gauss()*
+                scale*.11,
+                size,
+                Math.random()
+            )
+        );
+    }
+
+    /*
+     * 第二层：
+     * 每个轮廓点再扩散 3 次
+     *
+     * beta = 0.05
+     */
+    for(const p of contour){
+
+        for(let k=0;k<3;k++){
+
+            const q=
+                scatterInside(
+                    p.x,
+                    p.y,
+                    .05
+                );
+
+            edge.push(
+                makePoint(
+                    q.x,
+                    q.y,
+
+                    gauss()*
+                    scale*.16,
+
+                    Math.random()<.82
+                    ?1
+                    :1.5,
+
+                    Math.random()
+                )
+            );
+        }
+    }
+
+    /*
+     * 第三层：
+     * 10000 个中心扩散粒子
+     *
+     * beta = 0.27
+     *
+     * 这是目标视频中心不空、
+     * 又呈现星尘状态的重要原因。
+     */
+    for(let i=0;i<centerN;i++){
+
+        const p=
+            contour[
+                (
+                    Math.random()*
+                    contour.length
+                )|0
+            ];
+
+        const q=
+            scatterInside(
+                p.x,
+                p.y,
+                .27
+            );
+
+        center.push(
+            makePoint(
+                q.x,
+                q.y,
+
+                gauss()*
+                scale*.21,
+
+                Math.random()<.93
+                ?1
+                :1.5,
+
+                Math.random()
+            )
+        );
+    }
+}
+
+/* =========================================================
+   其他粒子
+========================================================= */
+
+function buildDecor(){
+
+    floorDots=[];
+    stream=[];
+    rays=[];
+    stars=[];
+
+    /*
+     * 地面粒子
+     */
+    const floorN=
+        mobile()
+        ?700
+        :1600;
+
+    for(let i=0;i<floorN;i++){
+
+        floorDots.push({
+            r:
+                Math.sqrt(
+                    Math.random()
+                ),
+
+            a:
+                Math.random()*
+                TAU,
+
+            s:
+                rand(
+                    .45,
+                    1.1
+                ),
+
+            alpha:
+                rand(
+                    .08,
+                    .38
+                )
+        });
+    }
+
+    /*
+     * 心尖 -> 地面
+     */
+    const streamN=
+        mobile()
+        ?120
+        :260;
+
+    for(let i=0;i<streamN;i++){
+
+        stream.push({
+            q:
+                Math.random(),
+
+            phase:
+                rand(
+                    0,
+                    TAU
+                ),
+
+            speed:
+                rand(
+                    .07,
+                    .15
+                ),
+
+            s:
+                Math.random()<.9
+                ?rand(.7,1.3)
+                :rand(1.8,3.2),
+
+            alpha:
+                rand(
+                    .25,
+                    .9
+                )
+        });
+    }
+
+    /*
+     * 最终爆发射线
+     */
+    const rayN=
+        mobile()
+        ?110
+        :230;
+
+    for(let i=0;i<rayN;i++){
+
+        rays.push({
+            u:
+                Math.random(),
+
+            delay:
+                rand(
+                    0,
+                    .45
+                ),
+
+            len:
+                rand(
+                    75,
+                    Math.max(
+                        130,
+                        Math.min(W,H)*
+                        .38
+                    )
+                ),
+
+            side:
+                rand(
+                    -.28,
+                    .28
+                ),
+
+            width:
+                rand(
+                    .45,
+                    1.4
+                ),
+
+            alpha:
+                rand(
+                    .15,
+                    .75
+                ),
+
+            spark:
+                Math.random()<.28
+        });
+    }
+
+    /*
+     * 背景星尘
+     */
+    const starN=
+        mobile()
+        ?450
+        :1100;
+
+    for(let i=0;i<starN;i++){
+
+        stars.push({
+            x:
+                Math.random(),
+
+            y:
+                Math.random(),
+
+            size:
+                Math.random()<.97
+                ?rand(.35,.9)
+                :rand(1.3,2.6),
+
+            alpha:
+                rand(
+                    .025,
+                    .18
+                ),
+
+            phase:
+                rand(
+                    0,
+                    TAU
+                )
+        });
+    }
+}
+
+/* =========================================================
+   Resize
+========================================================= */
+
+function resize(){
+
+    W=innerWidth;
+    H=innerHeight;
+
+    DPR=
+        Math.min(
+            devicePixelRatio||1,
+            1.6
+        );
+
+    canvas.width=
+        Math.round(
+            W*DPR
+        );
+
+    canvas.height=
+        Math.round(
+            H*DPR
+        );
+
+    canvas.style.width=
+        W+"px";
+
+    canvas.style.height=
+        H+"px";
+
+    ctx.setTransform(
+        DPR,
+        0,
+        0,
+        DPR,
+        0,
+        0
+    );
+
+    /*
+     * 不开启抗锯齿式图片平滑。
+     * 目标本身就是一颗颗清晰小粒子。
+     */
+    ctx.imageSmoothingEnabled=false;
+
+    scale=
+        Math.min(
+            W*.52/32,
+            H*.60/29
+        );
+
+    cx=W*.5;
+    cy=H*.335;
+
+    floorY=
+        Math.min(
+            H*.80,
+            cy+
+            scale*18.8
+        );
+
+    buildHeart();
+    buildDecor();
+
+    ctx.fillStyle="#000";
+    ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+    );
+}
+
+/* =========================================================
+   李峋版本的心跳
+========================================================= */
+
+function beatCurve(t){
+
+    /*
+     * 对应：
+     *
+     * curve(p)
+     * ratio = 15 * curve(...)
+     */
+
+    return (
+        2/
+        Math.PI
+    )*
+    Math.sin(
+        TAU*
+        t/
+        .92
+    );
+}
+
+/* =========================================================
+   动态阶段
+========================================================= */
+
+function rotYForPhase(ph){
+
+    /*
+     * 0 - 7.75
+     * 正面
+     */
+
+    if(ph<7.75){
+
+        return (
+            .025*
+            Math.sin(
+                ph*.6
+            )
+        );
+    }
+
+    /*
+     * 7.75 - 10.65
+     * 正面 -> 侧面
+     */
+    if(ph<10.65){
+
+        const q=
+            easeInOut(
+                (
+                    ph-
+                    7.75
+                )/
+                2.9
+            );
+
+        /*
+         * 中途增加轻微过冲，
+         * 避免机械线性旋转。
+         */
+        return (
+            1.47*q+
+            .065*
+            Math.sin(
+                q*
+                Math.PI*2
+            )*
+            Math.sin(
+                q*
+                Math.PI
+            )
+        );
+    }
+
+    /*
+     * 短暂保持侧面
+     */
+    if(ph<10.95){
+        return 1.47;
+    }
+
+    /*
+     * 重新回到正面
+     */
+    if(ph<12.55){
+
+        const q=
+            easeInOut(
+                (
+                    ph-
+                    10.95
+                )/
+                1.60
+            );
+
+        return (
+            1.47*
+            (1-q)
+            -
+            .06*
+            Math.sin(
+                q*
+                Math.PI
+            )*
+            q
+        );
+    }
+
+    return (
+        .015*
+        Math.sin(
+            ph*.9
+        )
+    );
+}
+
+function ringVis(ph){
+
+    return (
+        smooth(
+            (
+                ph-
+                7.45
+            )/
+            .65
+        )
+        *
+        (
+            1-
+            smooth(
+                (
+                    ph-
+                    12.15
+                )/
+                .65
+            )
+        )
+    );
+}
+
+function burstVis(ph){
+
+    return (
+        smooth(
+            (
+                ph-
+                12.25
+            )/
+            .30
+        )
+        *
+        (
+            1-
+            smooth(
+                (
+                    ph-
+                    14.05
+                )/
+                .45
+            )
+        )
+    );
+}
+
+/* =========================================================
+   粒子三维旋转
+========================================================= */
+
+function transform(
+    p,
+    ratio,
+    rot,
+    idx,
+    kind,
+    t
+){
+
+    /*
+     * 和 Python random.randint(-1,1)
+     * 对应的每帧随机抖动。
+     */
+    const jx=
+        (
+            hash01(
+                idx,
+                frameNo,
+                kind*23
+            )-
+            .5
+        )*
+        2;
+
+    const jy=
+        (
+            hash01(
+                idx,
+                frameNo,
+                kind*47
+            )-
+            .5
+        )*
+        2;
+
+    let x=
+        p.x-
+        ratio*
+        p.fx+
+        jx;
+
+    let y=
+        p.y-
+        ratio*
+        p.fy+
+        jy;
+
+    let z=
+        p.z+
+        Math.sin(
+            t*.9+
+            p.seed*31
+        )*
+        scale*.018;
+
+    const c=
+        Math.cos(rot);
+
+    const s=
+        Math.sin(rot);
+
+    /*
+     * Y 轴三维旋转
+     */
+    const xr=
+        x*c+
+        z*s;
+
+    const zr=
+        -x*s+
+        z*c;
+
+    return {
+        x:
+            cx+
+            xr,
+
+        y:
+            cy+
+            y+
+            zr*.035,
+
+        z:zr
+    };
+}
+
+/* =========================================================
+   三类主体粒子
+========================================================= */
+
+function drawCloud(
+    arr,
+    ratio,
+    rot,
+    t,
+    kind,
+    color,
+    alpha
+){
+
+    ctx.fillStyle=color;
+    ctx.globalAlpha=alpha;
+
+    for(
+        let i=0;
+        i<arr.length;
+        i++
+    ){
+
+        const p=arr[i];
+
+        const q=
+            transform(
+                p,
+                ratio,
+                rot,
+                i,
+                kind,
+                t
+            );
+
+        const s=p.size;
+
+        ctx.fillRect(
+            q.x-
+            s*.5,
+
+            q.y-
+            s*.5,
+
+            s,
+            s
+        );
+    }
+}
+
+/* =========================================================
+   动态 halo
+========================================================= */
+
+function drawHalo(
+    curve,
+    rot,
+    t
+){
+
+    const base=
+        mobile()
+        ?CFG.haloBaseMobile
+        :CFG.haloBaseDesktop;
+
+    const extra=
+        mobile()
+        ?CFG.haloExtraMobile
+        :CFG.haloExtraDesktop;
+
+    /*
+     * 视频代码：
+     *
+     * halo_number =
+     * 3000 +
+     * 4000 * abs(curve ** 2)
+     */
+    const n=
+        Math.floor(
+            base+
+            extra*
+            Math.abs(
+                curve*
+                curve
+            )
+        );
+
+    /*
+     * 视频代码：
+     *
+     * halo_radius =
+     * 4 + 6 * (1 + curve)
+     */
+    const haloRadius=
+        4+
+        6*
+        (
+            1+
+            curve
+        );
+
+    const haloScale=
+        scale*
+        1.055;
+
+    const jitter=
+        14*
+        (
+            scale/
+            11
+        );
+
+    ctx.globalAlpha=.50;
+    ctx.fillStyle=
+        "rgb(255,148,204)";
+
+    /*
+     * 关键：
+     *
+     * halo 每一帧重新随机生成，
+     * 所以不会像以前一样是一圈固定粒子。
+     */
+    for(let i=0;i<n;i++){
+
+        const tt=
+            Math.random()*
+            TAU;
+
+        const p=
+            heart(
+                tt,
+                haloScale
+            );
+
+        const r2=
+            Math.max(
+                16,
+                p.x*p.x+
+                p.y*p.y
+            );
+
+        /*
+         * 对应 shrink():
+         *
+         * force = -1 / r^1.2
+         */
+        const force=
+            -1/
+            Math.pow(
+                r2,
+                .60
+            );
+
+        let x=
+            p.x-
+            haloRadius*
+            force*
+            p.x;
+
+        let y=
+            p.y-
+            haloRadius*
+            force*
+            p.y;
+
+        /*
+         * ±14 随机扩散
+         */
+        x+=
+            rand(
+                -jitter,
+                jitter
+            );
+
+        y+=
+            rand(
+                -jitter,
+                jitter
+            );
+
+        let z=
+            gauss()*
+            scale*.20;
+
+        /*
+         * 和主体一起转向侧面
+         */
+        const c=
+            Math.cos(rot);
+
+        const s=
+            Math.sin(rot);
+
+        const xr=
+            x*c+
+            z*s;
+
+        const zr=
+            -x*s+
+            z*c;
+
+        const sx=
+            cx+xr;
+
+        const sy=
+            cy+y+
+            zr*.035;
+
+        const size=
+            Math.random()<.55
+            ?1
+            :Math.random()<.92
+            ?1.5
+            :2;
+
+        /*
+         * 极少数亮白粒子
+         */
+        if(Math.random()<.055){
+
+            ctx.globalAlpha=.85;
+
+            ctx.fillStyle=
+                "rgb(255,238,247)";
+
+            ctx.fillRect(
+                sx-size*.5,
+                sy-size*.5,
+                size+1,
+                size+1
+            );
+
+            ctx.globalAlpha=.50;
+
+            ctx.fillStyle=
+                "rgb(255,148,204)";
+
+        }else{
+
+            ctx.fillRect(
+                sx-size*.5,
+                sy-size*.5,
+                size,
+                size
+            );
+        }
+    }
+}
+
+/* =========================================================
+   三层旋转光环
+========================================================= */
+
+function drawOrbitRing(
+    yoff,
+    rx,
+    ry,
+    head,
+    alpha
+){
+
+    const steps=220;
+
+    ctx.lineWidth=.65;
+
+    for(
+        let j=0;
+        j<steps;
+        j++
+    ){
+
+        const a=
+            j/
+            steps*
+            TAU;
+
+        const b=
+            (
+                j+1
+            )/
+            steps*
+            TAU;
+
+        const mid=
+            (
+                a+b
+            )*.5;
+
+        const dist=
+            Math.atan2(
+                Math.sin(
+                    mid-
+                    head
+                ),
+                Math.cos(
+                    mid-
+                    head
+                )
+            );
+
+        /*
+         * 光环上有一个高速亮头，
+         * 不是整圈固定亮度。
+         */
+        const hot=
+            Math.exp(
+                -dist*
+                dist/
+                .20
+            );
+
+        ctx.globalAlpha=
+            alpha*
+            (
+                .16+
+                .84*
+                hot
+            );
+
+        ctx.strokeStyle=
+            hot>.45
+            ?"rgb(255,244,249)"
+            :"rgb(255,130,199)";
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            cx+
+            Math.cos(a)*
+            rx,
+
+            cy+
+            yoff+
+            Math.sin(a)*
+            ry
+        );
+
+        ctx.lineTo(
+            cx+
+            Math.cos(b)*
+            rx,
+
+            cy+
+            yoff+
+            Math.sin(b)*
+            ry
+        );
+
+        ctx.stroke();
+    }
+
+    /*
+     * 高亮粒子头
+     */
+    const hx=
+        cx+
+        Math.cos(head)*
+        rx;
+
+    const hy=
+        cy+
+        yoff+
+        Math.sin(head)*
+        ry;
+
+    ctx.globalAlpha=
+        alpha*.9;
+
+    ctx.fillStyle="#fff1f8";
+
+    ctx.fillRect(
+        hx-1.2,
+        hy-1.2,
+        2.4,
+        2.4
+    );
+}
+
+function drawOrbits(t,ph){
+
+    const a=
+        ringVis(ph);
+
+    if(a<=.001)
+        return;
+
+    drawOrbitRing(
+        -scale*5.0,
+        scale*10.5,
+        scale*1.65,
+        t*1.65,
+        a*.92
+    );
+
+    drawOrbitRing(
+        -scale*.45,
+        scale*11.8,
+        scale*1.95,
+        -t*1.25+2,
+        a
+    );
+
+    drawOrbitRing(
+        scale*4.55,
+        scale*10.7,
+        scale*1.72,
+        t*1.48+3.2,
+        a*.88
+    );
+}
+
+/* =========================================================
+   地面花瓣阵列
+========================================================= */
+
+function drawFloor(t){
+
+    ctx.save();
+
+    ctx.globalCompositeOperation=
+        "lighter";
+
+    const maxR=
+        Math.min(
+            W*.35,
+            scale*18.5
+        );
+
+    /*
+     * 透视压缩
+     */
+    const yScale=.23;
+
+    /*
+     * 放射线
+     */
+    const spokes=
+        mobile()
+        ?42
+        :66;
+
+    for(
+        let i=0;
+        i<spokes;
+        i++
+    ){
+
+        const a=
+            i/
+            spokes*
+            TAU+
+            t*.018;
+
+        const x2=
+            cx+
+            Math.cos(a)*
+            maxR;
+
+        const y2=
+            floorY+
+            Math.sin(a)*
+            maxR*
+            yScale;
+
+        const g=
+            ctx.createLinearGradient(
+                cx,
+                floorY,
+                x2,
+                y2
+            );
+
+        g.addColorStop(
+            0,
+            "rgba(255,246,251,.45)"
+        );
+
+        g.addColorStop(
+            .26,
+            "rgba(255,175,218,.20)"
+        );
+
+        g.addColorStop(
+            1,
+            "rgba(255,110,190,0)"
+        );
+
+        ctx.globalAlpha=.5;
+        ctx.strokeStyle=g;
+        ctx.lineWidth=.45;
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            cx,
+            floorY
+        );
+
+        ctx.lineTo(
+            x2,
+            y2
+        );
+
+        ctx.stroke();
+    }
+
+    /*
+     * 花瓣状同心环
+     */
+    const rings=
+        mobile()
+        ?20
+        :30;
+
+    for(
+        let r=1;
+        r<=rings;
+        r++
+    ){
+
+        const q=
+            r/rings;
+
+        const base=
+            maxR*
+            Math.pow(
+                q,
+                1.38
+            );
+
+        ctx.beginPath();
+
+        for(
+            let j=0;
+            j<=180;
+            j++
+        ){
+
+            const a=
+                j/
+                180*
+                TAU;
+
+            /*
+             * 两个频率叠加，
+             * 避免纯规则椭圆。
+             */
+            const wave=
+                1+
+                (
+                    .145*
+                    (1-q)+
+                    .018
+                )*
+                Math.sin(
+                    a*12-
+                    t*.65+
+                    r*.46
+                )
+                +
+                .012*
+                Math.sin(
+                    a*27+
+                    t*.2+
+                    r
+                );
+
+            const rr=
+                base*
+                wave;
+
+            const x=
+                cx+
+                Math.cos(a)*
+                rr;
+
+            const y=
+                floorY+
+                Math.sin(a)*
+                rr*
+                yScale;
+
+            if(j===0){
+
+                ctx.moveTo(
+                    x,
+                    y
+                );
+
+            }else{
+
+                ctx.lineTo(
+                    x,
+                    y
+                );
+            }
+        }
+
+        ctx.globalAlpha=
+            .12+
+            .32*
+            (1-q);
+
+        ctx.strokeStyle=
+            r<6
+            ?"rgb(255,240,248)"
+            :"rgb(255,163,210)";
+
+        ctx.lineWidth=
+            r<6
+            ?.9
+            :.55;
+
+        ctx.stroke();
+    }
+
+    /*
+     * 地面微粒
+     */
+    ctx.fillStyle=
+        "#ffd7eb";
+
+    for(const d of floorDots){
+
+        const rr=
+            d.r*
+            maxR;
+
+        const a=
+            d.a+
+            t*
+            .012*
+            (
+                1-
+                d.r
+            );
+
+        const x=
+            cx+
+            Math.cos(a)*
+            rr;
+
+        const y=
+            floorY+
+            Math.sin(a)*
+            rr*
+            yScale;
+
+        ctx.globalAlpha=
+            d.alpha*
+            (
+                1-
+                d.r*.6
+            );
+
+        ctx.fillRect(
+            x,
+            y,
+            d.s,
+            d.s
+        );
+    }
+
+    /*
+     * 中心波纹
+     */
+    for(let i=0;i<7;i++){
+
+        const k=
+            1+
+            Math.sin(
+                t*1.35-
+                i*.55
+            )*
+            .035;
+
+        const rx=
+            (
+                10+
+                i*11
+            )*
+            k;
+
+        const ry=
+            (
+                2.2+
+                i*2.25
+            )*
+            k;
+
+        ctx.globalAlpha=
+            .46-
+            i*.045;
+
+        ctx.strokeStyle=
+            i<2
+            ?"#fff7fb"
+            :"#ffb0d7";
+
+        ctx.lineWidth=
+            i<2
+            ?1.05
+            :.7;
+
+        ctx.beginPath();
+
+        ctx.ellipse(
+            cx,
+            floorY,
+            rx,
+            ry,
+            0,
+            0,
+            TAU
+        );
+
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+/* =========================================================
+   心尖粒子流
+========================================================= */
+
+function drawStream(
+    t,
+    ratio,
+    rot
+){
+
+    const p=
+        heart(
+            Math.PI,
+            scale
+        );
+
+    const r2=
+        Math.max(
+            16,
+            p.x*p.x+
+            p.y*p.y
+        );
+
+    const force=
+        1/
+        Math.pow(
+            r2,
+            .420
+        );
+
+    const x=
+        p.x-
+        ratio*
+        force*
+        p.x;
+
+    const y=
+        p.y-
+        ratio*
+        force*
+        p.y;
+
+    const c=
+        Math.cos(rot);
+
+    const tipX=
+        cx+
+        x*c;
+
+    const tipY=
+        cy+
+        y;
+
+    ctx.save();
+
+    ctx.globalCompositeOperation=
+        "lighter";
+
+    for(const d of stream){
+
+        const q=
+            fract(
+                d.q+
+                t*
+                d.speed
+            );
+
+        const middle=
+            Math.sin(
+                q*
+                Math.PI
+            );
+
+        const yy=
+            tipY+
+            (
+                floorY-
+                tipY
+            )*
+            q;
+
+        const xx=
+            tipX+
+            Math.sin(
+                d.phase+
+                t*2+
+                q*13
+            )*
+            scale*
+            .12*
+            middle;
+
+        ctx.globalAlpha=
+            d.alpha*
+            middle;
+
+        ctx.fillStyle=
+            d.s>1.6
+            ?"#fff5fa"
+            :"#ffc2df";
+
+        ctx.fillRect(
+            xx-
+            d.s*.5,
+
+            yy-
+            d.s*.5,
+
+            d.s,
+            d.s
+        );
+    }
+
+    ctx.restore();
+}
+
+/* =========================================================
+   最终爆发
+========================================================= */
+
+function drawBurst(
+    ph,
+    ratio
+){
+
+    const visibility=
+        burstVis(ph);
+
+    if(visibility<=.001)
+        return;
+
+    ctx.save();
+
+    ctx.globalCompositeOperation=
+        "lighter";
+
+    const local=
+        ph-
+        12.25;
+
+    for(
+        let i=0;
+        i<rays.length;
+        i++
+    ){
+
+        const r=
+            rays[i];
+
+        /*
+         * 每条射线错峰出现
+         */
+        const q=
+            clamp(
+                (
+                    local-
+                    r.delay
+                )/
+                .72,
+                0,
+                1
+            );
+
+        if(q<=0)
+            continue;
+
+        const base=
+            heart(
+                r.u*
+                TAU,
+                scale
+            );
+
+        const r2=
+            Math.max(
+                16,
+                base.x*base.x+
+                base.y*base.y
+            );
+
+        const force=
+            1/
+            Math.pow(
+                r2,
+                .420
+            );
+
+        const ox=
+            base.x-
+            ratio*
+            force*
+            base.x;
+
+        const oy=
+            base.y-
+            ratio*
+            force*
+            base.y;
+
+        const l=
+            Math.hypot(
+                ox,
+                oy
+            )||1;
+
+        let nx=
+            ox/l;
+
+        let ny=
+            oy/l;
+
+        const tx=-ny;
+        const ty=nx;
+
+        /*
+         * 加少量切向偏移，
+         * 避免所有线完全指向中心。
+         */
+        let dx=
+            nx+
+            tx*
+            r.side;
+
+        let dy=
+            ny+
+            ty*
+            r.side;
+
+        const dl=
+            Math.hypot(
+                dx,
+                dy
+            )||1;
+
+        dx/=dl;
+        dy/=dl;
+
+        const len=
+            r.len*
+            (
+                .35+
+                .65*
+                smooth(q)
+            );
+
+        const sx=
+            cx+
+            ox+
+            dx*
+            rand(0,4);
+
+        const sy=
+            cy+
+            oy+
+            dy*
+            rand(0,4);
+
+        const ex=
+            sx+
+            dx*
+            len;
+
+        const ey=
+            sy+
+            dy*
+            len;
+
+        const fade=
+            visibility*
+            (
+                1-
+                .38*q
+            )*
+            r.alpha;
+
+        const g=
+            ctx.createLinearGradient(
+                sx,
+                sy,
+                ex,
+                ey
+            );
+
+        g.addColorStop(
+            0,
+            "rgba(255,249,252,.96)"
+        );
+
+        g.addColorStop(
+            .20,
+            "rgba(255,189,224,.72)"
+        );
+
+        g.addColorStop(
+            1,
+            "rgba(255,112,195,0)"
+        );
+
+        ctx.globalAlpha=fade;
+        ctx.strokeStyle=g;
+        ctx.lineWidth=r.width;
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            sx,
+            sy
+        );
+
+        ctx.lineTo(
+            ex,
+            ey
+        );
+
+        ctx.stroke();
+
+        /*
+         * 部分射线末端带亮粒子
+         */
+        if(
+            r.spark&&
+            q>.25
+        ){
+
+            ctx.globalAlpha=
+                fade*.8;
+
+            ctx.fillStyle="#fff8fc";
+
+            ctx.fillRect(
+                ex-1,
+                ey-1,
+                2,
+                2
+            );
+        }
+    }
+
+    ctx.restore();
+}
+
+/* =========================================================
+   背景
+========================================================= */
+
+function drawBackground(t){
+
+    ctx.globalCompositeOperation=
+        "source-over";
+
+    ctx.globalAlpha=1;
+
+    ctx.fillStyle="#000";
+
+    ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+    );
+
+    /*
+     * 非常弱的粉色环境光。
+     * 不再使用大面积紫色雾。
+     */
+    const g=
+        ctx.createRadialGradient(
+            cx,
+            cy,
+            0,
+
+            cx,
+            cy,
+
+            Math.max(
+                W,
+                H
+            )*.48
+        );
+
+    g.addColorStop(
+        0,
+        "rgba(92,20,64,.11)"
+    );
+
+    g.addColorStop(
+        .36,
+        "rgba(42,8,34,.045)"
+    );
+
+    g.addColorStop(
+        1,
+        "rgba(0,0,0,0)"
+    );
+
+    ctx.fillStyle=g;
+
+    ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+    );
+
+    /*
+     * 背景星尘
+     */
+    ctx.globalCompositeOperation=
+        "lighter";
+
+    ctx.fillStyle=
+        "#ffafd4";
+
+    for(const s of stars){
+
+        ctx.globalAlpha=
+            s.alpha*
+            (
+                .55+
+                .45*
+                Math.sin(
+                    t*.7+
+                    s.phase
+                )
+            );
+
+        const x=
+            s.x*
+            W;
+
+        const y=
+            s.y*
+            H;
+
+        ctx.fillRect(
+            x,
+            y,
+            s.size,
+            s.size
+        );
+    }
+
+    ctx.globalAlpha=1;
+}
+
+/* =========================================================
+   Main
+========================================================= */
+
+function animate(now){
+
+    requestAnimationFrame(
+        animate
+    );
+
+    const dt=
+        Math.min(
+            (
+                now-
+                last
+            )/
+            1000,
+            .033
+        );
+
+    last=now;
+
+    const t=
+        now*
+        .001;
+
+    frameNo=
+        (
+            frameNo+
+            1
+        )|0;
+
+    const ph=
+        t%
+        LOOP;
+
+    const curve=
+        beatCurve(t);
+
+    /*
+     * 视频代码核心参数：
+     *
+     * ratio = 15 * curve(...)
+     */
+    const ratio=
+        15*
+        curve;
+
+    const rot=
+        rotYForPhase(
+            ph
+        );
+
+    drawBackground(t);
+
+    /*
+     * 地面在后
+     */
+    drawFloor(t);
+
+    ctx.save();
+
+    /*
+     * 目标的亮感主要来自高密度粒子叠加，
+     * 不是 Gaussian blur / Bloom。
+     */
+    ctx.globalCompositeOperation=
+        "lighter";
+
+    /*
+     * 每帧随机 halo
+     */
+    drawHalo(
+        curve,
+        rot,
+        t
+    );
+
+    /*
+     * 中心 -> 边缘 -> 轮廓
+     *
+     * 越靠边越亮。
+     */
+    drawCloud(
+        center,
+        ratio,
+        rot,
+        t,
+        3,
+        "rgb(255,143,196)",
+        .23
+    );
+
+    drawCloud(
+        edge,
+        ratio,
+        rot,
+        t,
+        2,
+        "rgb(255,177,215)",
+        .48
+    );
+
+    drawCloud(
+        contour,
+        ratio,
+        rot,
+        t,
+        1,
+        "rgb(255,226,239)",
+        .88
+    );
+
+    /*
+     * 动态环绕光环
+     */
+    drawOrbits(
+        t,
+        ph
+    );
+
+    ctx.restore();
+
+    /*
+     * 心尖能量流
+     */
+    drawStream(
+        t,
+        ratio,
+        rot
+    );
+
+    /*
+     * 12.25 秒左右进入爆发阶段
+     */
+    drawBurst(
+        ph,
+        ratio
+    );
+}
 
 addEventListener(
     "resize",
     ()=>{
 
-        const mobile=
-            innerWidth<720;
-
-        camera.aspect=
-            innerWidth/
-            innerHeight;
-
-        camera.fov=
-            mobile?56:47;
-
-        camera.position.z=
-            mobile?43:38;
-
-        camera.updateProjectionMatrix();
-
-        renderer.setSize(
-            innerWidth,
-            innerHeight
+        clearTimeout(
+            resizeTimer
         );
 
-        composer.setSize(
-            innerWidth,
-            innerHeight
-        );
+        resizeTimer=
+            setTimeout(
+                resize,
+                100
+            );
+    },
+    {
+        passive:true
     }
 );
 
-/* =========================================================
-   ANIMATION
-========================================================= */
+resize();
 
-const clock=new THREE.Clock();
+requestAnimationFrame(
+    animate
+);
 
-function animate(){
-
-    requestAnimationFrame(animate);
-
-    const t=
-        clock.getElapsedTime();
-
-    const ph=
-        t%LOOP;
-
-    heartMaterial
-        .uniforms
-        .uTime
-        .value=t;
-
-    flowMaterial
-        .uniforms
-        .uTime
-        .value=t;
-
-    burstMaterial
-        .uniforms
-        .uTime
-        .value=t;
-
-    pointer.x+=
-        (pointer.tx-pointer.x)*
-        .022;
-
-    pointer.y+=
-        (pointer.ty-pointer.y)*
-        .022;
-
-    /*
-     * 镜头本身也有很轻微的惯性。
-     */
-
-    const camX=
-        pointer.x*.27+
-        Math.sin(t*.16)*.08;
-
-    const camY=
-        4.1-
-        pointer.y*.14+
-        Math.sin(t*.11)*.05;
-
-    camera.position.x+=
-        (camX-camera.position.x)*
-        .018;
-
-    camera.position.y+=
-        (camY-camera.position.y)*
-        .018;
-
-    camera.lookAt(
-        0,
-        .45,
-        0
-    );
-
-    /*
-     * 整个 heartGroup 不再负责“大幅旋转”。
-     * 真正旋转由 shader 内每个粒子完成。
-     */
-
-    heartGroup.rotation.x=
-        pointer.y*.010;
-
-    heartGroup.rotation.z=
-        Math.sin(t*.13)*.003;
-
-    /*
-     * 地面慢速反向旋转。
-     */
-
-    floorGroup.rotation.y=
-        -t*.016;
-
-    centerRings.rotation.y=
-        t*.14;
-
-    /*
-     * 能量冲击时地面产生响应。
-     */
-
-    const shock=
-        Math.exp(
-            -Math.pow(
-                (ph-8.30)/.32,
-                2
-            )
-        );
-
-    centerRings.scale.setScalar(
-        1+
-        shock*.075+
-        Math.sin(t*1.2)*.008
-    );
-
-    /*
-     * 星空非常慢的漂移。
-     */
-
-    starPoints.rotation.z=
-        t*.0008;
-
-    composer.render();
-}
-
-animate();
+})();
 </script>
+
 </body>
 </html>
