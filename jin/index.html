@@ -13,7 +13,6 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
 </style>
 </head>
 <body>
-<body>
 <canvas id="love" aria-hidden="true"></canvas>
 
 <script>
@@ -21,8 +20,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
 "use strict";
 
 const canvas=document.getElementById("love");
-const ctx=canvas.getContext("2d",{alpha:false,desynchronized:true});
-
+const ctx=canvas.getContext("2d",{alpha:false});
 const TAU=Math.PI*2;
 const LUT_SIZE=2048;
 
@@ -31,7 +29,8 @@ let centerX=0,floorY=0,heartUnit=1,floorRadius=1;
 let bgGradient=null,vignetteGradient=null;
 let glowPink=null,glowWhite=null;
 let lastProfile="";
-let startTime=performance.now();
+let animationTime=0;
+let lastFrameTime=performance.now();
 
 let core=[];
 let shell=[];
@@ -51,14 +50,17 @@ const curveNY=new Float32Array(LUT_SIZE);
 const curveSample={x:0,y:0,nx:0,ny:0};
 const projected={x:0,y:0,k:1,z:0};
 const floorProjected={x:0,y:0,z:0};
+const orbitSample={x:0,y:0,z:0};
 
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const mix=(a,b,t)=>a+(b-a)*t;
 const fract=v=>v-Math.floor(v);
+
 const smooth=v=>{
     v=clamp(v);
     return v*v*(3-2*v);
 };
+
 const smoother=v=>{
     v=clamp(v);
     return v*v*v*(v*(v*6-15)+10);
@@ -88,6 +90,7 @@ const gaussian=()=>random()+random()+random()+random()-2;
 
 function heartPoint(t){
     const s=Math.sin(t);
+
     const y=
         13*Math.cos(t)
         -5*Math.cos(2*t)
@@ -95,7 +98,7 @@ function heartPoint(t){
         -Math.cos(4*t);
 
     return[
-        0.97*s*s*s,
+        .97*s*s*s,
         (y+2.5)/14.5
     ];
 }
@@ -174,11 +177,12 @@ function buildHeart(profile){
     random=mulberry32(0x5f3759df);
 
     const mobile=profile==="mobile";
+
     const count={
-        core:mobile?900:1550,
-        shell:mobile?3200:5400,
-        inside:mobile?1250:2250,
-        dust:mobile?620:1150
+        core:mobile?760:1250,
+        shell:mobile?2450:4200,
+        inside:mobile?2250:3900,
+        dust:mobile?460:780
     };
 
     core=[];
@@ -189,24 +193,26 @@ function buildHeart(profile){
     for(let i=0;i<count.core;i++){
         const u=(i+rnd(-.38,.38))/count.core;
         const ring=rnd(.004,.034);
-        const a=rnd(TAU);
+        const angle=rnd(TAU);
 
         core.push(pointBase(
             u,
-            Math.cos(a)*ring+gaussian()*.006,
-            Math.sin(a)*ring*1.3+gaussian()*.008,
+            Math.cos(angle)*ring+gaussian()*.006,
+            Math.sin(angle)*ring*1.3+gaussian()*.008,
             rnd(.75,1.9),
             rnd(.62,.96),
-            random()<.20,
-            rnd(.0015,.0055)
+            random()<.16,
+            rnd(.0028,.0058)
         ));
     }
 
     for(let i=0;i<count.shell;i++){
         const tube=Math.abs(gaussian())*rnd(.035,.105);
-        const a=rnd(TAU);
+        const angle=rnd(TAU);
 
-        let offset=Math.cos(a)*tube+gaussian()*.022;
+        let offset=
+            Math.cos(angle)*tube+
+            gaussian()*.022;
 
         if(random()<.17){
             offset+=
@@ -218,25 +224,25 @@ function buildHeart(profile){
         shell.push(pointBase(
             random(),
             offset,
-            Math.sin(a)*tube*1.5+gaussian()*.038,
+            Math.sin(angle)*tube*1.5+gaussian()*.038,
             random()<.09?rnd(2,3.25):rnd(.65,2.15),
             rnd(.30,.76),
-            random()<.095,
-            rnd(.002,.010)
+            random()<.075,
+            rnd(.004,.009)
         ));
     }
 
     for(let i=0;i<count.inside;i++){
-        const radius=.10+.80*Math.pow(random(),.34);
+        const radius=.035+.925*Math.sqrt(random());
 
         const p=pointBase(
             random(),
             gaussian()*.018,
             gaussian()*(.035+.10*(1-radius)),
-            random()<.06?rnd(1.8,2.55):rnd(.55,1.65),
-            rnd(.20,.62),
+            random()<.065?rnd(1.8,2.65):rnd(.58,1.72),
+            rnd(.29,.70),
             random()<.075,
-            rnd(-.008,.008)
+            rnd(.002,.0065)
         );
 
         p.radius=radius;
@@ -257,7 +263,7 @@ function buildHeart(profile){
             rnd(.45,1.45),
             rnd(.10,.38),
             random()<.045,
-            rnd(-.012,.014)
+            rnd(.006,.013)
         );
 
         p.wobble=rnd(.008,.035);
@@ -269,15 +275,17 @@ function buildFloor(){
     floorDots=[];
 
     for(let ringIndex=0;ringIndex<10;ringIndex++){
-        const r=.10+ringIndex*.092;
-        const count=50+ringIndex*14;
+        const radius=.10+ringIndex*.092;
+        const count=36+ringIndex*10;
 
         for(let i=0;i<count;i++){
-            const a=i/count*TAU+rnd(-.008,.008);
+            const angle=
+                i/count*TAU+
+                rnd(-.008,.008);
 
             floorDots.push({
-                x:Math.cos(a)*r,
-                z:Math.sin(a)*r,
+                x:Math.cos(angle)*radius,
+                z:Math.sin(angle)*radius,
                 size:rnd(.55,1.18),
                 alpha:rnd(.20,.56),
                 phase:rnd(TAU)
@@ -285,15 +293,17 @@ function buildFloor(){
         }
     }
 
-    for(let spokeIndex=0;spokeIndex<58;spokeIndex++){
-        const a=spokeIndex/58*TAU;
+    for(let spokeIndex=0;spokeIndex<46;spokeIndex++){
+        const angle=spokeIndex/46*TAU;
 
-        for(let i=2;i<24;i++){
-            const r=i/24+rnd(-.008,.008);
+        for(let i=2;i<19;i++){
+            const radius=
+                i/19+
+                rnd(-.008,.008);
 
             floorDots.push({
-                x:Math.cos(a)*r,
-                z:Math.sin(a)*r,
+                x:Math.cos(angle)*radius,
+                z:Math.sin(angle)*radius,
                 size:rnd(.52,1.12),
                 alpha:rnd(.18,.48),
                 phase:rnd(TAU)
@@ -301,14 +311,17 @@ function buildFloor(){
         }
     }
 
-    for(let i=0;i<1050;i++){
-        const a=i/1050*TAU;
-        const wave=Math.sin(18*a);
-        const r=Math.sign(wave)*Math.pow(Math.abs(wave),.72);
+    for(let i=0;i<720;i++){
+        const angle=i/720*TAU;
+        const wave=Math.sin(18*angle);
+
+        const radius=
+            Math.sign(wave)*
+            Math.pow(Math.abs(wave),.72);
 
         floorDots.push({
-            x:Math.cos(a)*r,
-            z:Math.sin(a)*r,
+            x:Math.cos(angle)*radius,
+            z:Math.sin(angle)*radius,
             size:rnd(.55,1.22),
             alpha:rnd(.28,.65),
             phase:rnd(TAU)
@@ -392,7 +405,7 @@ function resize(){
 
     DPR=Math.min(
         devicePixelRatio||1,
-        profile==="mobile"?1.55:1.9
+        profile==="mobile"?1.30:1.55
     );
 
     canvas.width=Math.round(W*DPR);
@@ -442,33 +455,33 @@ function sceneState(seconds){
 
     let zoom=1;
 
-    if(t>=6.05&&t<6.36){
-        zoom=mix(1,.68,smoother((t-6.05)/.31));
-    }else if(t>=6.36&&t<9.56){
-        zoom=.68;
-    }else if(t>=9.56){
-        zoom=mix(.68,1,smoother((t-9.56)/.44));
+    if(t>=6&&t<6.78){
+        zoom=mix(1,.70,smoother((t-6)/.78));
+    }else if(t>=6.78&&t<9.10){
+        zoom=.70;
+    }else if(t>=9.10){
+        zoom=mix(.70,1,smoother((t-9.10)/.90));
     }
 
     let rotation=0;
 
-    if(t<1.20){
-        rotation=Math.PI*smoother(t/1.20);
+    if(t<1.45){
+        rotation=Math.PI*smoother(t/1.45);
     }else if(t<1.90){
         rotation=Math.PI;
-    }else if(t<2.76){
+    }else if(t<2.88){
         rotation=
             Math.PI+
-            Math.PI*smoother((t-1.90)/.86);
-    }else if(t<8){
+            Math.PI*smoother((t-1.90)/.98);
+    }else if(t<7.15){
         rotation=TAU;
     }else{
         rotation=
             TAU+
-            Math.PI*smoother((t-8)/2);
+            TAU*smoother((t-7.15)/2.85);
     }
 
-    const ringIn=.52+.48*smooth(t/.28);
+    const ringIn=smooth(t/.48);
     const ringOut=1-smooth((t-1.92)/.70);
     const ring=ringIn*ringOut;
 
@@ -568,6 +581,7 @@ function drawBackground(seconds){
 
     for(let i=0;i<stars.length;i++){
         const p=stars[i];
+
         const flicker=
             .55+
             .45*Math.sin(seconds*p.speed+p.phase);
@@ -588,42 +602,42 @@ function drawBackground(seconds){
 }
 
 function drawFloorGlow(state){
-    const r=floorRadius*state.zoom;
+    const radius=floorRadius*state.zoom;
 
     ctx.save();
     ctx.translate(centerX,floorY);
     ctx.scale(1,.31);
 
-    const g=ctx.createRadialGradient(
+    const gradient=ctx.createRadialGradient(
         0,0,0,
-        0,0,r*1.05
+        0,0,radius*1.05
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
         0,
         `rgba(255,185,221,${.13+state.burst*.13})`
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
         .25,
         "rgba(255,125,193,.055)"
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
         1,
         "rgba(255,95,177,0)"
     );
 
-    ctx.fillStyle=g;
+    ctx.fillStyle=gradient;
     ctx.beginPath();
-    ctx.arc(0,0,r*1.05,0,TAU);
+    ctx.arc(0,0,radius*1.05,0,TAU);
     ctx.fill();
 
     ctx.restore();
 }
 
 function rosettePath(state,seconds){
-    const angle=seconds*.025;
+    const angle=seconds*.012;
     const count=1450;
 
     ctx.beginPath();
@@ -631,13 +645,14 @@ function rosettePath(state,seconds){
     for(let i=0;i<=count;i++){
         const a=i/count*TAU;
         const wave=Math.sin(18*a);
-        const r=
+
+        const radius=
             Math.sign(wave)*
             Math.pow(Math.abs(wave),.72);
 
         const p=projectFloor(
-            Math.cos(a)*r,
-            Math.sin(a)*r,
+            Math.cos(a)*radius,
+            Math.sin(a)*radius,
             state.zoom,
             angle
         );
@@ -651,7 +666,7 @@ function rosettePath(state,seconds){
 }
 
 function floorCircle(radius,state,seconds){
-    const angle=seconds*.025;
+    const angle=seconds*.012;
     const count=120;
 
     ctx.beginPath();
@@ -719,32 +734,32 @@ function drawFloor(state,seconds){
         ctx.stroke();
     }
 
-    const angle=seconds*.025;
+    const angle=seconds*.012;
 
     ctx.fillStyle="#ffd5e7";
     ctx.shadowBlur=0;
 
     for(let i=0;i<floorDots.length;i++){
-        const d=floorDots[i];
+        const dot=floorDots[i];
 
         const p=projectFloor(
-            d.x,
-            d.z,
+            dot.x,
+            dot.z,
             state.zoom,
             angle
         );
 
         const flicker=
             .70+
-            .30*Math.sin(seconds*1.35+d.phase);
+            .30*Math.sin(seconds*1.35+dot.phase);
 
         ctx.globalAlpha=
-            d.alpha*
+            dot.alpha*
             flicker*
             (1+state.burst*.35);
 
         const size=
-            d.size*
+            dot.size*
             (.78+.22*state.zoom);
 
         ctx.fillRect(
@@ -801,29 +816,29 @@ function drawStem(state,seconds){
         );
     }
 
-    const g=ctx.createRadialGradient(
+    const gradient=ctx.createRadialGradient(
         centerX,floorY,0,
         centerX,floorY,
         heartUnit*.17*state.zoom
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
         0,
         `rgba(255,248,252,${.24+state.flash*.18})`
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
         .18,
         "rgba(255,180,218,.13)"
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
         1,
         "rgba(255,110,184,0)"
     );
 
     ctx.globalAlpha=1;
-    ctx.fillStyle=g;
+    ctx.fillStyle=gradient;
     ctx.beginPath();
 
     ctx.arc(
@@ -947,44 +962,44 @@ function drawFlare(state,centerY,front=false){
         state.zoom*
         (front?.34:.76);
 
-    const g=ctx.createRadialGradient(
+    const gradient=ctx.createRadialGradient(
         0,0,0,
         0,0,radius
     );
 
     if(front){
-        g.addColorStop(
+        gradient.addColorStop(
             0,
             `rgba(255,255,255,${state.flash*.28})`
         );
 
-        g.addColorStop(
+        gradient.addColorStop(
             .30,
             `rgba(255,224,240,${state.flash*.12})`
         );
     }else{
-        g.addColorStop(
+        gradient.addColorStop(
             0,
             `rgba(255,255,255,${state.flash*.75})`
         );
 
-        g.addColorStop(
+        gradient.addColorStop(
             .16,
             `rgba(255,224,241,${state.flash*.46})`
         );
 
-        g.addColorStop(
+        gradient.addColorStop(
             .48,
             `rgba(255,114,188,${state.flash*.15})`
         );
     }
 
-    g.addColorStop(
+    gradient.addColorStop(
         1,
         "rgba(255,95,177,0)"
     );
 
-    ctx.fillStyle=g;
+    ctx.fillStyle=gradient;
     ctx.beginPath();
     ctx.arc(0,0,radius,0,TAU);
     ctx.fill();
@@ -992,24 +1007,24 @@ function drawFlare(state,centerY,front=false){
     ctx.restore();
 }
 
-function orbitPoint(index,count,state,seconds){
+function orbitPoint(index,count,seconds){
     const progress=index/(count-1);
     const u=progress*TAU*3.18;
-    const phase=u+seconds*1.16;
+    const phase=u+seconds*.78;
 
     const radius=
         1.13+
         .055*Math.sin(u*2.35+seconds*.7);
 
-    const x=Math.cos(phase)*radius;
-    const z=Math.sin(phase)*radius;
+    orbitSample.x=Math.cos(phase)*radius;
+    orbitSample.z=Math.sin(phase)*radius;
 
-    const y=
+    orbitSample.y=
         .84-
         progress*1.68+
         .065*Math.sin(u*1.7+seconds*.8);
 
-    return{x,y,z};
+    return orbitSample;
 }
 
 function traceOrbit(front,state,seconds,centerY){
@@ -1019,22 +1034,21 @@ function traceOrbit(front,state,seconds,centerY){
     ctx.beginPath();
 
     for(let i=0;i<count;i++){
-        const o=orbitPoint(
+        const orbit=orbitPoint(
             i,
             count,
-            state,
             seconds
         );
 
         const visible=
             front?
-            o.z>=-.02:
-            o.z<-.02;
+            orbit.z>=-.02:
+            orbit.z<-.02;
 
         const p=projectOrbit(
-            o.x,
-            o.y,
-            o.z,
+            orbit.x,
+            orbit.y,
+            orbit.z,
             state,
             centerY
         );
@@ -1113,19 +1127,18 @@ function drawOrbit(front,state,seconds,centerY){
 
             const index=Math.floor(u*519);
 
-            const o=orbitPoint(
+            const orbit=orbitPoint(
                 index,
                 520,
-                state,
                 seconds
             );
 
-            if(o.z<0)continue;
+            if(orbit.z<0)continue;
 
             const p=projectOrbit(
-                o.x,
-                o.y,
-                o.z,
+                orbit.x,
+                orbit.y,
+                orbit.z,
                 state,
                 centerY
             );
@@ -1242,7 +1255,7 @@ function drawHeartParticles(
     for(let i=0;i<list.length;i++){
         const p=list[i];
 
-        const c=sampleCurve(
+        const curve=sampleCurve(
             p.u+
             seconds*p.flow
         );
@@ -1256,16 +1269,16 @@ function drawHeartParticles(
 
         if(kind==="inside"){
             x=
-                c.x*p.radius+
+                curve.x*p.radius+
                 p.jx;
 
             y=
-                (c.y+.055)*p.radius-
+                (curve.y+.055)*p.radius-
                 .055+
                 p.jy;
 
-            x+=c.nx*p.offset;
-            y+=c.ny*p.offset;
+            x+=curve.nx*p.offset;
+            y+=curve.ny*p.offset;
 
             z=
                 p.z+
@@ -1275,8 +1288,8 @@ function drawHeartParticles(
                 p.offset+
                 oscillation*p.wobble;
 
-            x=c.x+c.nx*offset;
-            y=c.y+c.ny*offset;
+            x=curve.x+curve.nx*offset;
+            y=curve.y+curve.ny*offset;
 
             z=
                 p.z+
@@ -1293,7 +1306,7 @@ function drawHeartParticles(
             y=(y+.04)*push-.04;
         }
 
-        const q=projectHeart(
+        const screen=projectHeart(
             x,
             y,
             z,
@@ -1302,17 +1315,17 @@ function drawHeartParticles(
         );
 
         if(
-            q.x<-12||
-            q.x>W+12||
-            q.y<-12||
-            q.y>H+12
+            screen.x<-12||
+            screen.x>W+12||
+            screen.y<-12||
+            screen.y>H+12
         ){
             continue;
         }
 
         const twinkle=
-            .66+
-            .34*Math.pow(
+            .82+
+            .18*Math.pow(
                 .5+
                 .5*Math.sin(
                     seconds*p.twinkle+
@@ -1331,13 +1344,13 @@ function drawHeartParticles(
         const size=
             p.size*
             (.78+.22*state.zoom)*
-            clamp(q.k,.78,1.24);
+            clamp(screen.k,.78,1.24);
 
         ctx.globalAlpha=alpha;
 
         ctx.fillRect(
-            q.x-size*.5,
-            q.y-size*.5,
+            screen.x-size*.5,
+            screen.y-size*.5,
             size,
             size
         );
@@ -1363,8 +1376,8 @@ function drawHeartParticles(
 
             ctx.drawImage(
                 sprite,
-                q.x-diameter*.5,
-                q.y-diameter*.5,
+                screen.x-diameter*.5,
+                screen.y-diameter*.5,
                 diameter,
                 diameter
             );
@@ -1453,7 +1466,18 @@ function drawVignette(){
 }
 
 function render(now){
-    const seconds=(now-startTime)/1000;
+    const delta=Math.min(
+        .034,
+        Math.max(
+            0,
+            (now-lastFrameTime)/1000
+        )
+    );
+
+    lastFrameTime=now;
+    animationTime+=delta;
+
+    const seconds=animationTime;
     const state=sceneState(seconds);
 
     drawBackground(seconds);
@@ -1546,6 +1570,14 @@ glowWhite=makeGlow(
 addEventListener(
     "resize",
     resize,
+    {passive:true}
+);
+
+document.addEventListener(
+    "visibilitychange",
+    ()=>{
+        lastFrameTime=performance.now();
+    },
     {passive:true}
 );
 
