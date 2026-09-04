@@ -6,99 +6,71 @@
 <title>Love</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{
-    width:100%;
-    height:100%;
-    overflow:hidden;
-    background:#07040d;
-}
-body{
-    background:
-        radial-gradient(circle at 50% 36%,rgba(76,31,68,.26) 0%,rgba(24,10,31,.15) 34%,rgba(7,4,13,0) 67%),
-        #07040d;
-}
-#canvas{
-    position:fixed;
-    inset:0;
-    width:100%;
-    height:100%;
-    display:block;
-}
+html,body{width:100%;height:100%;overflow:hidden;background:#06030b}
+body{background:#06030b}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .home{
-    position:fixed;
-    top:22px;
-    left:24px;
-    z-index:10;
-    color:rgba(255,220,240,.25);
-    text-decoration:none;
-    font:10px Arial,sans-serif;
-    letter-spacing:3px;
-    transition:.35s;
+    position:fixed;top:20px;left:22px;z-index:10;
+    color:rgba(255,225,242,.25);text-decoration:none;
+    font:10px Arial,sans-serif;letter-spacing:3px;transition:.35s
 }
-.home:hover{
-    color:#ffe4f4;
-    text-shadow:0 0 14px rgba(255,126,203,.8);
-}
+.home:hover{color:#fff0f8;text-shadow:0 0 15px #ff71c1}
 </style>
 </head>
 <body>
-
 <a class="home" href="/">HOME</a>
-<canvas id="canvas"></canvas>
+<canvas id="c"></canvas>
 
 <script>
-(() => {
+(()=>{
 "use strict";
 
-const canvas=document.getElementById("canvas");
+const canvas=document.getElementById("c");
 const ctx=canvas.getContext("2d",{alpha:false});
-
-let W=0;
-let H=0;
-let DPR=1;
-
 const TAU=Math.PI*2;
-const CURVE_N=4096;
+const CURVE_N=2048;
+
+let W=0,H=0,DPR=1;
+let mouseX=0,mouseY=0,targetMouseX=0,targetMouseY=0;
+let firstFrame=true,lastTime=performance.now();
+let burstAccumulator=0;
 
 const curveX=new Float32Array(CURVE_N);
 const curveY=new Float32Array(CURVE_N);
 const curveNX=new Float32Array(CURVE_N);
 const curveNY=new Float32Array(CURVE_N);
 
-let tinyParticles=[];
-let softParticles=[];
-let hotParticles=[];
-let innerParticles=[];
+const flowGroups=[[],[],[]];
+let hotFlow=[];
+let dust=[];
 let rays=[];
+let ribbons=[];
+let bursts=[];
+let floorDots=[];
+let streamDust=[];
 let stars=[];
-let streamParticles=[];
 
-let glowPink;
-let glowWhite;
-let glowTiny;
+let glowWhite,glowPink,glowSoft;
 
-let mouseX=0;
-let mouseY=0;
-let targetMouseX=0;
-let targetMouseY=0;
+const COLORS=[
+    "rgba(255,237,248,1)",
+    "rgba(255,160,216,1)",
+    "rgba(230,93,186,1)"
+];
 
-function rand(a,b){
-    return a+Math.random()*(b-a);
-}
-
+function rand(a,b){return a+Math.random()*(b-a)}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
+function normU(u){u%=1;if(u<0)u+=1;return u}
 function gaussian(){
-    return (Math.random()+Math.random()+Math.random()+Math.random()-2);
+    return Math.random()+Math.random()+Math.random()+Math.random()-2;
 }
 
 function heart(t){
     const s=Math.sin(t);
-    const x=16*s*s*s;
-    const y=
-        13*Math.cos(t)
-        -5*Math.cos(2*t)
-        -2*Math.cos(3*t)
-        -Math.cos(4*t);
-    return [x,-y];
+    return [
+        16*s*s*s,
+        -(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))
+    ];
 }
 
 function buildCurve(){
@@ -110,182 +82,325 @@ function buildCurve(){
     }
 
     for(let i=0;i<CURVE_N;i++){
-        const prev=(i-2+CURVE_N)%CURVE_N;
-        const next=(i+2)%CURVE_N;
+        const a=(i-2+CURVE_N)%CURVE_N;
+        const b=(i+2)%CURVE_N;
 
-        const dx=curveX[next]-curveX[prev];
-        const dy=curveY[next]-curveY[prev];
+        let dx=curveX[b]-curveX[a];
+        let dy=curveY[b]-curveY[a];
+        const l=Math.hypot(dx,dy)||1;
 
-        const len=Math.sqrt(dx*dx+dy*dy)||1;
+        dx/=l;
+        dy/=l;
 
-        curveNX[i]=-dy/len;
-        curveNY[i]=dx/len;
+        let nx=-dy;
+        let ny=dx;
+
+        if(nx*curveX[i]+ny*curveY[i]<0){
+            nx=-nx;
+            ny=-ny;
+        }
+
+        curveNX[i]=nx;
+        curveNY[i]=ny;
     }
 }
 
 function sampleCurve(u){
-    u=((u%1)+1)%1;
+    u=normU(u);
 
     const f=u*CURVE_N;
-    const i0=Math.floor(f)%CURVE_N;
-    const i1=(i0+1)%CURVE_N;
+    const i=Math.floor(f)%CURVE_N;
+    const j=(i+1)%CURVE_N;
     const a=f-Math.floor(f);
 
-    return {
-        x:curveX[i0]+(curveX[i1]-curveX[i0])*a,
-        y:curveY[i0]+(curveY[i1]-curveY[i0])*a,
-        nx:curveNX[i0]+(curveNX[i1]-curveNX[i0])*a,
-        ny:curveNY[i0]+(curveNY[i1]-curveNY[i0])*a
-    };
+    let nx=curveNX[i]+(curveNX[j]-curveNX[i])*a;
+    let ny=curveNY[i]+(curveNY[j]-curveNY[i])*a;
+    const nl=Math.hypot(nx,ny)||1;
+    nx/=nl;
+    ny/=nl;
+
+    const x=curveX[i]+(curveX[j]-curveX[i])*a;
+    const y=curveY[i]+(curveY[j]-curveY[i])*a;
+
+    const tx=-ny;
+    const ty=nx;
+
+    return {x,y,nx,ny,tx,ty};
 }
 
-function makeSprite(size,inner,mid){
+function makeGlow(size,c0,c1,c2){
     const c=document.createElement("canvas");
     c.width=c.height=size;
-
     const g=c.getContext("2d");
-    const r=size*.5;
+    const r=size/2;
 
-    const gradient=g.createRadialGradient(r,r,0,r,r,r);
+    const grad=g.createRadialGradient(r,r,0,r,r,r);
+    grad.addColorStop(0,c0);
+    grad.addColorStop(.09,c0);
+    grad.addColorStop(.25,c1);
+    grad.addColorStop(.58,c2);
+    grad.addColorStop(1,"rgba(255,80,190,0)");
 
-    gradient.addColorStop(0,inner);
-    gradient.addColorStop(.09,inner);
-    gradient.addColorStop(.23,mid);
-    gradient.addColorStop(.55,"rgba(255,110,200,.12)");
-    gradient.addColorStop(1,"rgba(255,80,190,0)");
-
-    g.fillStyle=gradient;
+    g.fillStyle=grad;
     g.fillRect(0,0,size,size);
-
     return c;
 }
 
 function createSprites(){
-    glowWhite=makeSprite(
-        64,
+    glowWhite=makeGlow(
+        96,
         "rgba(255,255,255,1)",
-        "rgba(255,220,242,.9)"
+        "rgba(255,232,246,.95)",
+        "rgba(255,132,205,.20)"
     );
 
-    glowPink=makeSprite(
-        48,
-        "rgba(255,240,250,.92)",
-        "rgba(255,130,205,.72)"
+    glowPink=makeGlow(
+        72,
+        "rgba(255,243,250,.88)",
+        "rgba(255,135,205,.72)",
+        "rgba(242,79,180,.15)"
     );
 
-    glowTiny=makeSprite(
-        24,
-        "rgba(255,248,252,.9)",
-        "rgba(255,155,215,.55)"
+    glowSoft=makeGlow(
+        128,
+        "rgba(255,190,226,.22)",
+        "rgba(232,83,188,.13)",
+        "rgba(167,48,154,.05)"
     );
 }
 
-function createParticles(){
-    tinyParticles=[];
-    softParticles=[];
-    hotParticles=[];
-    innerParticles=[];
-    rays=[];
-    stars=[];
-    streamParticles=[];
-
+function getLayout(){
     const mobile=W<700;
 
-    const contourCount=mobile?6500:14500;
-    const innerCount=mobile?1100:2600;
-    const rayCount=mobile?75:165;
-    const starCount=mobile?450:1200;
-    const streamCount=mobile?420:1050;
+    const heartWidth=Math.min(
+        W*(mobile?.80:.52),
+        H*(mobile?.72:.74)
+    );
 
-    for(let i=0;i<contourCount;i++){
-        let band;
+    return {
+        cx:W*.5+mouseX*4,
+        cy:H*(mobile?.34:.34)+mouseY*2,
+        scale:heartWidth/32
+    };
+}
+
+function heartbeat(t){
+    const q=t%1.48;
+    let b=0;
+
+    if(q<.105)b=Math.sin(q/.105*Math.PI);
+    if(q>.17&&q<.285)b+=.47*Math.sin((q-.17)/.115*Math.PI);
+
+    return 1+b*.020+Math.sin(t*.65)*.0035;
+}
+
+function localWidth(u,t,scale){
+    const a=Math.sin(u*TAU*3.0-t*.41);
+    const b=Math.sin(u*TAU*8.0+t*.29);
+    const c=Math.sin(u*TAU*17.0-t*.17);
+
+    return scale*(
+        .63+
+        a*.095+
+        b*.065+
+        c*.025
+    );
+}
+
+function targetPosition(p,t,layout,pulse){
+    const u=normU(p.u);
+    const c=sampleCurve(u);
+
+    const width=localWidth(u,t,layout.scale);
+
+    const turbulence=
+        Math.sin(u*TAU*9+t*.92+p.phase)*width*.13+
+        Math.sin(u*TAU*21-t*.47+p.phase*1.7)*width*.055;
+
+    const offset=
+        p.band*width+
+        turbulence;
+
+    const wave=
+        Math.sin(u*TAU*5-t*.28)*
+        layout.scale*.055;
+
+    return {
+        x:layout.cx+
+          c.x*layout.scale*pulse+
+          c.nx*(offset+wave),
+
+        y:layout.cy+
+          c.y*layout.scale*pulse+
+          c.ny*(offset+wave),
+
+        nx:c.nx,
+        ny:c.ny,
+        tx:c.tx,
+        ty:c.ty
+    };
+}
+
+function createFlow(){
+    for(const g of flowGroups)g.length=0;
+    hotFlow.length=0;
+
+    const mobile=W<700;
+    const count=mobile?3800:7600;
+
+    for(let i=0;i<count;i++){
         const r=Math.random();
 
-        if(r<.70){
-            band=gaussian()*.48;
-        }else if(r<.94){
-            band=gaussian()*.90;
-        }else{
-            band=gaussian()*1.65;
-        }
+        let band=gaussian()*.52;
+
+        if(r>.82)band*=1.55;
+        if(r>.96)band*=2.1;
+
+        const tone=
+            Math.random()<.40?0:
+            Math.random()<.72?1:2;
 
         const p={
             u:Math.random(),
             band,
-            speed:rand(.006,.018)*(Math.random()<.12?-1:1),
             phase:rand(0,TAU),
-            wobble:rand(.02,.18),
-            alpha:rand(.45,1),
-            size:rand(.7,1.35)
+            speed:rand(.022,.060)*(Math.random()<.10?-1:1),
+            x:0,y:0,px:0,py:0,
+            vx:0,vy:0,
+            size:rand(.45,1.15),
+            alpha:rand(.50,1),
+            tone,
+            hot:Math.random()<.035,
+            hotSize:rand(4,10)
         };
 
-        const q=Math.random();
+        flowGroups[tone].push(p);
+        if(p.hot)hotFlow.push(p);
+    }
 
-        if(q<.79){
-            tinyParticles.push(p);
-        }else if(q<.965){
-            p.size=rand(3.0,6.5);
-            softParticles.push(p);
-        }else{
-            p.size=rand(7,14);
-            hotParticles.push(p);
+    const L=getLayout();
+    const pulse=heartbeat(0);
+
+    for(const group of flowGroups){
+        for(const p of group){
+            const q=targetPosition(p,0,L,pulse);
+            p.x=p.px=q.x+gaussian()*2;
+            p.y=p.py=q.y+gaussian()*2;
         }
     }
+}
 
-    for(let i=0;i<innerCount;i++){
-        const t=Math.random();
-        const radius=Math.pow(Math.random(),.72)*.83;
-        const p=sampleCurve(t);
+function createDust(){
+    dust.length=0;
 
-        innerParticles.push({
-            u:t,
-            radius,
-            phase:rand(0,TAU),
-            alpha:rand(.12,.55),
-            size:Math.random()<.91?rand(.55,1.35):rand(3,6),
-            hot:Math.random()<.06
-        });
-    }
+    const count=W<700?650:1550;
 
-    for(let i=0;i<rayCount;i++){
-        rays.push({
+    for(let i=0;i<count;i++){
+        dust.push({
             u:Math.random(),
-            length:rand(.08,.31),
-            speed:rand(.025,.075),
-            phase:Math.random(),
-            width:rand(.35,1.15),
-            alpha:rand(.05,.20),
-            offset:rand(5,55)
-        });
-    }
-
-    for(let i=0;i<starCount;i++){
-        stars.push({
-            x:Math.random(),
-            y:Math.random(),
+            radius:Math.pow(Math.random(),.55)*.80,
             phase:rand(0,TAU),
-            alpha:rand(.06,.46),
-            size:Math.random()<.94?rand(.45,1.25):rand(2,4.5)
-        });
-    }
-
-    for(let i=0;i<streamCount;i++){
-        streamParticles.push({
-            phase:Math.random(),
-            speed:rand(.05,.16),
-            spread:gaussian(),
-            drift:rand(0,TAU),
-            alpha:rand(.2,1),
-            size:Math.random()<.88?rand(.7,1.6):rand(3,7)
+            size:Math.random()<.94?rand(.45,1.1):rand(2,4),
+            alpha:rand(.06,.36),
+            hot:Math.random()<.03
         });
     }
 }
 
-function resize(){
-    W=window.innerWidth;
-    H=window.innerHeight;
+function createRays(){
+    rays.length=0;
 
-    DPR=Math.min(window.devicePixelRatio||1,1.75);
+    const count=W<700?65:145;
+
+    for(let i=0;i<count;i++){
+        rays.push({
+            u:Math.random(),
+            phase:rand(0,TAU),
+            speed:rand(.11,.31),
+            length:rand(.08,.28),
+            start:rand(3,40),
+            width:rand(.35,1.05),
+            alpha:rand(.035,.16)
+        });
+    }
+}
+
+function createRibbons(){
+    ribbons.length=0;
+
+    const count=W<700?13:26;
+
+    for(let i=0;i<count;i++){
+        ribbons.push({
+            u:Math.random(),
+            speed:rand(.035,.092)*(Math.random()<.12?-1:1),
+            band:gaussian()*.30,
+            phase:rand(0,TAU),
+            length:rand(.016,.045),
+            alpha:rand(.10,.35),
+            width:rand(.6,1.35)
+        });
+    }
+}
+
+function createStars(){
+    stars.length=0;
+
+    const count=W<700?350:900;
+
+    for(let i=0;i<count;i++){
+        stars.push({
+            x:Math.random(),
+            y:Math.random(),
+            size:Math.random()<.97?rand(.35,1):rand(2,3.5),
+            alpha:rand(.03,.28),
+            phase:rand(0,TAU)
+        });
+    }
+}
+
+function createFloorDots(){
+    floorDots.length=0;
+
+    const count=W<700?600:1500;
+
+    for(let i=0;i<count;i++){
+        floorDots.push({
+            r:Math.sqrt(Math.random()),
+            a:Math.random()*TAU,
+            alpha:rand(.04,.24),
+            size:rand(.35,.9)
+        });
+    }
+
+    streamDust.length=0;
+
+    const streamCount=W<700?100:230;
+
+    for(let i=0;i<streamCount;i++){
+        streamDust.push({
+            q:Math.random(),
+            phase:rand(0,TAU),
+            alpha:rand(.20,.85),
+            size:Math.random()<.9?rand(.5,1.2):rand(2,4)
+        });
+    }
+}
+
+function recreate(){
+    createFlow();
+    createDust();
+    createRays();
+    createRibbons();
+    createStars();
+    createFloorDots();
+    bursts.length=0;
+}
+
+function resize(){
+    W=innerWidth;
+    H=innerHeight;
+    DPR=Math.min(devicePixelRatio||1,1.7);
 
     canvas.width=Math.round(W*DPR);
     canvas.height=Math.round(H*DPR);
@@ -295,69 +410,35 @@ function resize(){
 
     ctx.setTransform(DPR,0,0,DPR,0,0);
 
-    createParticles();
+    firstFrame=true;
+    recreate();
 }
 
-function layout(){
-    const mobile=W<700;
-
-    const heartWidth=mobile
-        ?Math.min(W*.86,H*.55)
-        :Math.min(W*.58,H*.52);
-
-    const scale=heartWidth/32;
-
-    const cx=W*.5+mouseX*5;
-    const cy=H*(mobile?.34:.355)+mouseY*3;
-
-    return {cx,cy,scale};
-}
-
-function heartbeat(t){
-    const q=t%1.52;
-
-    let beat=0;
-
-    if(q<.11){
-        beat=Math.sin(q/.11*Math.PI);
-    }
-
-    if(q>.18&&q<.30){
-        beat+=.48*Math.sin((q-.18)/.12*Math.PI);
-    }
-
-    return 1+beat*.026+Math.sin(t*.72)*.004;
-}
-
-function heartScreenPoint(u,cx,cy,scale,pulse,band=0){
-    const p=sampleCurve(u);
-
-    const wobbleScale=scale*band;
-
-    return {
-        x:cx+p.x*scale*pulse+p.nx*wobbleScale,
-        y:cy+p.y*scale*pulse+p.ny*wobbleScale,
-        nx:p.nx,
-        ny:p.ny,
-        lx:p.x,
-        ly:p.y
-    };
-}
-
-function drawBackground(t){
+function drawBackground(t,layout){
     ctx.globalCompositeOperation="source-over";
 
-    ctx.fillStyle="#06030b";
-    ctx.fillRect(0,0,W,H);
+    if(firstFrame){
+        ctx.fillStyle="#06030b";
+        ctx.fillRect(0,0,W,H);
+    }else{
+        ctx.fillStyle="rgba(6,3,11,.20)";
+        ctx.fillRect(0,0,W,H);
+    }
 
-    let g=ctx.createRadialGradient(
-        W*.5,H*.37,0,
-        W*.5,H*.37,Math.max(W,H)*.62
+    const radius=Math.max(W,H)*.50;
+
+    const g=ctx.createRadialGradient(
+        layout.cx,
+        layout.cy-H*.01,
+        0,
+        layout.cx,
+        layout.cy,
+        radius
     );
 
-    g.addColorStop(0,"rgba(74,29,66,.30)");
-    g.addColorStop(.27,"rgba(44,17,48,.20)");
-    g.addColorStop(.58,"rgba(17,8,25,.11)");
+    g.addColorStop(0,"rgba(91,28,74,.055)");
+    g.addColorStop(.30,"rgba(61,19,59,.035)");
+    g.addColorStop(.67,"rgba(18,7,27,.015)");
     g.addColorStop(1,"rgba(0,0,0,0)");
 
     ctx.fillStyle=g;
@@ -365,29 +446,24 @@ function drawBackground(t){
 
     ctx.globalCompositeOperation="lighter";
 
-    ctx.fillStyle="rgba(245,160,215,.52)";
-
     for(const s of stars){
-        const a=
-            s.alpha*
-            (.58+.42*Math.sin(t*.75+s.phase));
+        const alpha=s.alpha*(.55+.45*Math.sin(t*.35+s.phase));
 
-        if(a<=.02)continue;
-
-        ctx.globalAlpha=a;
+        ctx.globalAlpha=alpha;
+        ctx.fillStyle="rgb(239,143,209)";
 
         const x=s.x*W;
         const y=s.y*H;
 
-        if(s.size<1.8){
+        if(s.size<1.4){
             ctx.fillRect(x,y,s.size,s.size);
         }else{
             ctx.drawImage(
-                glowTiny,
-                x-s.size*.5,
-                y-s.size*.5,
-                s.size,
-                s.size
+                glowPink,
+                x-s.size,
+                y-s.size,
+                s.size*2,
+                s.size*2
             );
         }
     }
@@ -395,56 +471,7 @@ function drawBackground(t){
     ctx.globalAlpha=1;
 }
 
-function buildHeartPath(cx,cy,scale,pulse){
-    ctx.beginPath();
-
-    const steps=400;
-
-    for(let i=0;i<=steps;i++){
-        const u=i/steps;
-        const p=sampleCurve(u);
-
-        const x=cx+p.x*scale*pulse;
-        const y=cy+p.y*scale*pulse;
-
-        if(i===0)ctx.moveTo(x,y);
-        else ctx.lineTo(x,y);
-    }
-
-    ctx.closePath();
-}
-
-function drawHeartGlow(cx,cy,scale,pulse){
-    ctx.save();
-
-    ctx.globalCompositeOperation="lighter";
-
-    buildHeartPath(cx,cy,scale,pulse);
-
-    ctx.filter=`blur(${Math.max(7,scale*.85)}px)`;
-    ctx.strokeStyle="rgba(255,65,177,.15)";
-    ctx.lineWidth=scale*4.1;
-    ctx.stroke();
-
-    buildHeartPath(cx,cy,scale,pulse);
-
-    ctx.filter=`blur(${Math.max(4,scale*.4)}px)`;
-    ctx.strokeStyle="rgba(255,140,205,.17)";
-    ctx.lineWidth=scale*2.7;
-    ctx.stroke();
-
-    buildHeartPath(cx,cy,scale,pulse);
-
-    ctx.filter=`blur(${Math.max(1.5,scale*.12)}px)`;
-    ctx.strokeStyle="rgba(255,228,242,.20)";
-    ctx.lineWidth=scale*.92;
-    ctx.stroke();
-
-    ctx.filter="none";
-    ctx.restore();
-}
-
-function drawRays(t,cx,cy,scale,pulse){
+function drawRays(t,layout,pulse){
     ctx.save();
     ctx.globalCompositeOperation="lighter";
     ctx.lineCap="round";
@@ -452,588 +479,595 @@ function drawRays(t,cx,cy,scale,pulse){
     const maxDim=Math.max(W,H);
 
     for(const r of rays){
-        const q=(r.phase+t*r.speed)%1;
+        const c=sampleCurve(r.u);
 
-        const hp=heartScreenPoint(
-            r.u,
-            cx,
-            cy,
-            scale,
-            pulse
+        const hx=layout.cx+c.x*layout.scale*pulse;
+        const hy=layout.cy+c.y*layout.scale*pulse;
+
+        const pulseRay=Math.pow(
+            Math.max(0,Math.sin(t*r.speed+r.phase)),
+            4
         );
 
-        let dx=hp.x-cx;
-        let dy=hp.y-cy;
+        if(pulseRay<.01)continue;
 
-        let len=Math.sqrt(dx*dx+dy*dy)||1;
+        let ox=c.nx;
+        let oy=c.ny;
 
-        dx/=len;
-        dy/=len;
+        const start=r.start+
+            Math.sin(t*.4+r.phase)*8;
 
-        const moving=r.offset+q*90;
-        const startX=hp.x+dx*moving;
-        const startY=hp.y+dy*moving;
+        const length=maxDim*r.length*(.65+.35*pulseRay);
 
-        const rayLength=maxDim*r.length*(.55+.45*(1-q));
+        const sx=hx+ox*start;
+        const sy=hy+oy*start;
 
-        const endX=startX+dx*rayLength;
-        const endY=startY+dy*rayLength;
+        const ex=sx+ox*length;
+        const ey=sy+oy*length;
 
-        const fade=Math.pow(1-q,1.45);
+        const grad=ctx.createLinearGradient(sx,sy,ex,ey);
+        grad.addColorStop(0,"rgba(255,145,213,.55)");
+        grad.addColorStop(.25,"rgba(229,83,183,.22)");
+        grad.addColorStop(1,"rgba(125,37,130,0)");
 
-        ctx.globalAlpha=r.alpha*fade;
-        ctx.strokeStyle="rgba(255,78,186,1)";
+        ctx.globalAlpha=r.alpha*pulseRay;
+        ctx.strokeStyle=grad;
         ctx.lineWidth=r.width;
 
         ctx.beginPath();
-        ctx.moveTo(startX,startY);
-        ctx.lineTo(endX,endY);
+        ctx.moveTo(sx,sy);
+        ctx.lineTo(ex,ey);
         ctx.stroke();
-
-        if(r.alpha>.11){
-            const s=3+r.width*3;
-
-            ctx.globalAlpha=r.alpha*fade*.7;
-
-            ctx.drawImage(
-                glowTiny,
-                startX-s*.5,
-                startY-s*.5,
-                s,s
-            );
-        }
     }
 
-    ctx.globalAlpha=1;
     ctx.restore();
 }
 
-function drawInterior(t,cx,cy,scale,pulse){
+function drawDust(t,layout,pulse){
     ctx.save();
     ctx.globalCompositeOperation="lighter";
 
-    ctx.fillStyle="rgba(255,176,219,.72)";
+    ctx.fillStyle="rgba(245,161,217,1)";
 
-    for(const p of innerParticles){
-        const hp=sampleCurve(p.u);
+    for(const p of dust){
+        const c=sampleCurve(p.u);
 
-        const driftX=Math.sin(t*.55+p.phase)*scale*.06;
-        const driftY=Math.cos(t*.47+p.phase*1.3)*scale*.05;
+        const drift=
+            Math.sin(t*.33+p.phase)*layout.scale*.09;
+
+        const r=p.radius+
+            Math.sin(t*.17+p.phase)*.006;
 
         const x=
-            cx+
-            hp.x*scale*p.radius*pulse+
-            driftX;
+            layout.cx+
+            c.x*layout.scale*r*pulse+
+            c.nx*drift;
 
         const y=
-            cy+
-            hp.y*scale*p.radius*pulse+
-            driftY;
+            layout.cy+
+            c.y*layout.scale*r*pulse+
+            c.ny*drift;
 
-        const twinkle=
-            .52+
-            .48*Math.sin(
-                t*(.7+p.alpha)+
-                p.phase
-            );
+        const shimmer=.5+.5*Math.sin(t*(.5+p.alpha)+p.phase);
 
-        const alpha=
-            p.alpha*
-            (.45+.55*twinkle);
+        ctx.globalAlpha=p.alpha*(.45+.55*shimmer);
 
-        ctx.globalAlpha=alpha;
-
-        if(p.size<2){
-            ctx.fillRect(x,y,p.size,p.size);
+        if(p.hot){
+            const s=p.size*2.4;
+            ctx.drawImage(glowWhite,x-s/2,y-s/2,s,s);
+        }else if(p.size>1.5){
+            const s=p.size*2;
+            ctx.drawImage(glowPink,x-s/2,y-s/2,s,s);
         }else{
-            const s=p.hot?p.size*1.5:p.size;
+            ctx.fillRect(x,y,p.size,p.size);
+        }
+    }
 
-            ctx.drawImage(
-                p.hot?glowWhite:glowTiny,
-                x-s*.5,
-                y-s*.5,
-                s,s
+    ctx.restore();
+}
+
+function updateFlow(t,dt,layout,pulse){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+
+    for(let tone=0;tone<3;tone++){
+        const group=flowGroups[tone];
+
+        ctx.beginPath();
+
+        for(const p of group){
+            p.px=p.x;
+            p.py=p.y;
+
+            p.u=normU(p.u+p.speed*dt);
+
+            const q=targetPosition(p,t,layout,pulse);
+
+            const dx=q.x-p.x;
+            const dy=q.y-p.y;
+
+            p.vx+=dx*.060;
+            p.vy+=dy*.060;
+
+            const swirl=
+                Math.sin(t*.8+p.phase+p.u*TAU*7);
+
+            p.vx+=q.tx*swirl*.012;
+            p.vy+=q.ty*swirl*.012;
+
+            p.vx*=.875;
+            p.vy*=.875;
+
+            p.x+=p.vx;
+            p.y+=p.vy;
+
+            const movement=Math.hypot(p.x-p.px,p.y-p.py);
+
+            if(movement<12){
+                ctx.moveTo(p.px,p.py);
+                ctx.lineTo(p.x,p.y);
+            }
+        }
+
+        ctx.globalAlpha=tone===0?.31:tone===1?.24:.14;
+        ctx.strokeStyle=COLORS[tone];
+        ctx.lineWidth=tone===0?.82:tone===1?.72:.60;
+        ctx.stroke();
+
+        ctx.globalAlpha=tone===0?.75:tone===1?.58:.38;
+        ctx.fillStyle=COLORS[tone];
+
+        for(let i=0;i<group.length;i+=2){
+            const p=group[i];
+            ctx.fillRect(
+                p.x-p.size*.5,
+                p.y-p.size*.5,
+                p.size,
+                p.size
             );
         }
     }
 
-    ctx.globalAlpha=1;
-    ctx.restore();
-}
+    for(const p of hotFlow){
+        const q=.72+.28*Math.sin(t*2.7+p.phase);
+        const s=p.hotSize*q;
 
-function particlePosition(p,t,cx,cy,scale,pulse){
-    const u=p.u+t*p.speed;
-
-    const wobble=
-        p.band+
-        Math.sin(
-            t*.75+
-            p.phase
-        )*p.wobble;
-
-    return heartScreenPoint(
-        u,
-        cx,
-        cy,
-        scale,
-        pulse,
-        wobble
-    );
-}
-
-function drawHeartParticles(t,cx,cy,scale,pulse){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-
-    ctx.fillStyle="rgba(255,191,226,.88)";
-    ctx.globalAlpha=.68;
-
-    for(const p of tinyParticles){
-        const a=particlePosition(
-            p,t,cx,cy,scale,pulse
-        );
-
-        const size=p.size;
-
-        ctx.fillRect(
-            a.x-size*.5,
-            a.y-size*.5,
-            size,
-            size
-        );
-    }
-
-    ctx.globalAlpha=.68;
-
-    for(const p of softParticles){
-        const a=particlePosition(
-            p,t,cx,cy,scale,pulse
-        );
-
-        const shimmer=
-            .72+
-            .28*Math.sin(
-                t*1.6+
-                p.phase
-            );
-
-        const s=p.size*shimmer;
-
-        ctx.globalAlpha=
-            p.alpha*.58;
-
-        ctx.drawImage(
-            glowPink,
-            a.x-s*.5,
-            a.y-s*.5,
-            s,s
-        );
-    }
-
-    for(const p of hotParticles){
-        const a=particlePosition(
-            p,t,cx,cy,scale,pulse
-        );
-
-        const shimmer=
-            .76+
-            .24*Math.sin(
-                t*2.1+
-                p.phase
-            );
-
-        const s=p.size*shimmer;
-
-        ctx.globalAlpha=
-            .68+
-            p.alpha*.28;
+        ctx.globalAlpha=.28+p.alpha*.34;
 
         ctx.drawImage(
             glowWhite,
-            a.x-s*.5,
-            a.y-s*.5,
+            p.x-s/2,
+            p.y-s/2,
             s,s
         );
     }
 
-    ctx.globalAlpha=1;
     ctx.restore();
 }
 
-function drawHotContour(cx,cy,scale,pulse){
+function drawRibbons(t,layout,pulse){
     ctx.save();
     ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+    ctx.lineJoin="round";
 
-    buildHeartPath(cx,cy,scale,pulse);
+    for(const r of ribbons){
+        r.u=normU(r.u+r.speed/60);
 
-    ctx.strokeStyle="rgba(255,236,246,.14)";
-    ctx.lineWidth=Math.max(.55,scale*.13);
-    ctx.stroke();
+        const steps=15;
 
-    ctx.restore();
-}
+        let previous=null;
 
-function getHeartBottom(cx,cy,scale,pulse){
-    let maxY=-Infinity;
+        for(let i=0;i<steps;i++){
+            const q=i/(steps-1);
 
-    for(let i=0;i<512;i++){
-        const p=sampleCurve(i/512);
-        const y=cy+p.y*scale*pulse;
-        if(y>maxY)maxY=y;
+            const u=normU(
+                r.u-
+                r.length*q*
+                Math.sign(r.speed)
+            );
+
+            const c=sampleCurve(u);
+            const w=localWidth(u,t,layout.scale);
+
+            const offset=
+                r.band*w+
+                Math.sin(
+                    u*TAU*13+
+                    t*.8+
+                    r.phase
+                )*
+                w*.12;
+
+            const x=
+                layout.cx+
+                c.x*layout.scale*pulse+
+                c.nx*offset;
+
+            const y=
+                layout.cy+
+                c.y*layout.scale*pulse+
+                c.ny*offset;
+
+            if(previous){
+                const alpha=(1-q)*(1-q)*r.alpha;
+
+                ctx.globalAlpha=alpha;
+                ctx.strokeStyle=
+                    q<.3
+                        ?"rgba(255,250,253,1)"
+                        :"rgba(255,150,214,1)";
+
+                ctx.lineWidth=r.width*(1-q*.65);
+
+                ctx.beginPath();
+                ctx.moveTo(previous.x,previous.y);
+                ctx.lineTo(x,y);
+                ctx.stroke();
+            }
+
+            previous={x,y};
+        }
     }
 
-    return maxY;
+    ctx.restore();
 }
 
-function drawFloor(t,cx,floorY){
-    const maxR=Math.min(
-        W*.60,
-        H*1.08
-    );
+function spawnBurst(t,layout,pulse){
+    const u=Math.random();
+    const c=sampleCurve(u);
 
-    const yScale=.205;
+    const width=localWidth(u,t,layout.scale);
+    const offset=gaussian()*width*.75;
+
+    const x=
+        layout.cx+
+        c.x*layout.scale*pulse+
+        c.nx*offset;
+
+    const y=
+        layout.cy+
+        c.y*layout.scale*pulse+
+        c.ny*offset;
+
+    const outward=rand(22,95);
+    const tangent=rand(-35,35);
+
+    bursts.push({
+        x,y,px:x,py:y,
+        vx:c.nx*outward+c.tx*tangent,
+        vy:c.ny*outward+c.ty*tangent,
+        life:rand(.55,1.65),
+        age:0,
+        size:Math.random()<.92?rand(.45,1.15):rand(2.5,5.5),
+        tone:Math.random()<.45?0:1,
+        phase:rand(0,TAU)
+    });
+}
+
+function updateBursts(t,dt,layout,pulse){
+    burstAccumulator+=(W<700?75:165)*dt;
+
+    while(burstAccumulator>=1){
+        burstAccumulator--;
+        spawnBurst(t,layout,pulse);
+    }
+
+    if(bursts.length>1500){
+        bursts.splice(0,bursts.length-1500);
+    }
 
     ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
 
+    for(let i=bursts.length-1;i>=0;i--){
+        const p=bursts[i];
+
+        p.age+=dt;
+
+        if(p.age>=p.life){
+            bursts.splice(i,1);
+            continue;
+        }
+
+        p.px=p.x;
+        p.py=p.y;
+
+        const q=p.age/p.life;
+
+        p.vx*=Math.pow(.982,dt*60);
+        p.vy*=Math.pow(.982,dt*60);
+
+        p.vx+=Math.sin(t*2+p.phase)*2.5*dt;
+        p.vy+=Math.cos(t*1.7+p.phase)*2.0*dt;
+
+        p.x+=p.vx*dt;
+        p.y+=p.vy*dt;
+
+        const fade=(1-q)*(1-q);
+
+        ctx.globalAlpha=fade*.30;
+        ctx.strokeStyle=COLORS[p.tone];
+        ctx.lineWidth=.65;
+
+        ctx.beginPath();
+        ctx.moveTo(p.px,p.py);
+        ctx.lineTo(p.x,p.y);
+        ctx.stroke();
+
+        ctx.globalAlpha=fade*.85;
+
+        if(p.size<1.6){
+            ctx.fillStyle=COLORS[p.tone];
+            ctx.fillRect(p.x,p.y,p.size,p.size);
+        }else{
+            const s=p.size*(1+.5*q);
+            ctx.drawImage(
+                p.tone===0?glowWhite:glowPink,
+                p.x-s/2,
+                p.y-s/2,
+                s,s
+            );
+        }
+    }
+
+    ctx.restore();
+}
+
+function bottomPoint(layout,pulse){
+    const c=sampleCurve(.5);
+
+    return {
+        x:layout.cx+c.x*layout.scale*pulse,
+        y:layout.cy+c.y*layout.scale*pulse
+    };
+}
+
+function drawFloor(t,layout,pulse){
+    const tip=bottomPoint(layout,pulse);
+
+    const floorY=tip.y+Math.max(14,layout.scale*.62);
+
+    const maxR=Math.min(
+        W*(W<700?.62:.39),
+        H*.47
+    );
+
+    const sy=W<700?.21:.19;
+
+    ctx.save();
     ctx.globalCompositeOperation="lighter";
 
-    /*
-     * 放射线
-     */
-    ctx.lineWidth=.55;
-    ctx.setLineDash([1.1,5]);
+    const floorGlow=ctx.createRadialGradient(
+        layout.cx,floorY,0,
+        layout.cx,floorY,maxR*.72
+    );
 
-    const spokes=W<700?38:64;
+    floorGlow.addColorStop(0,"rgba(255,190,229,.08)");
+    floorGlow.addColorStop(.28,"rgba(212,88,193,.025)");
+    floorGlow.addColorStop(1,"rgba(100,30,120,0)");
+
+    ctx.globalAlpha=1;
+    ctx.fillStyle=floorGlow;
+    ctx.fillRect(
+        layout.cx-maxR,
+        floorY-maxR*.25,
+        maxR*2,
+        maxR*.5
+    );
+
+    const spokes=W<700?40:64;
 
     for(let i=0;i<spokes;i++){
         const a=i/spokes*TAU;
 
-        const x2=cx+Math.cos(a)*maxR;
-        const y2=floorY+Math.sin(a)*maxR*yScale;
+        const x2=layout.cx+Math.cos(a)*maxR;
+        const y2=floorY+Math.sin(a)*maxR*sy;
 
-        const front=(Math.sin(a)+1)*.5;
+        const grad=ctx.createLinearGradient(
+            layout.cx,floorY,x2,y2
+        );
 
-        ctx.globalAlpha=.045+.075*front;
-        ctx.strokeStyle="rgba(216,116,222,1)";
+        grad.addColorStop(0,"rgba(255,205,236,.24)");
+        grad.addColorStop(.23,"rgba(220,110,206,.11)");
+        grad.addColorStop(1,"rgba(130,57,150,0)");
+
+        ctx.globalAlpha=.22;
+        ctx.strokeStyle=grad;
+        ctx.lineWidth=.45;
 
         ctx.beginPath();
-        ctx.moveTo(cx,floorY);
+        ctx.moveTo(layout.cx,floorY);
         ctx.lineTo(x2,y2);
         ctx.stroke();
     }
 
-    /*
-     * 波纹环
-     */
-    const rings=W<700?18:27;
+    const ringCount=W<700?17:23;
 
-    ctx.setLineDash([1.2,3.2]);
-
-    for(let ri=1;ri<=rings;ri++){
-        const q=ri/rings;
-
-        const baseR=
-            maxR*
-            Math.pow(q,1.38);
-
+    for(let ri=1;ri<=ringCount;ri++){
+        const q=ri/ringCount;
+        const base=maxR*Math.pow(q,1.43);
         const steps=190;
 
         ctx.beginPath();
 
-        for(let j=0;j<=steps;j++){
-            const a=j/steps*TAU;
+        for(let i=0;i<=steps;i++){
+            const a=i/steps*TAU;
 
-            const petals=
+            const petal=
                 1+
-                (.030+.045*(1-q))*
+                (.105*(1-q)+.018)*
                 Math.sin(
                     a*8-
-                    t*.60+
-                    ri*.53
+                    t*.42+
+                    ri*.37
                 );
 
-            const ripple=
+            const fine=
                 1+
-                .014*
+                .015*
                 Math.sin(
-                    a*17+
-                    t*.36+
+                    a*19+
+                    t*.21+
                     ri
                 );
 
-            const r=
-                baseR*
-                petals*
-                ripple;
+            const r=base*petal*fine;
 
-            const x=
-                cx+
-                Math.cos(a)*r;
+            const x=layout.cx+Math.cos(a)*r;
+            const y=floorY+Math.sin(a)*r*sy;
 
-            const y=
-                floorY+
-                Math.sin(a)*r*yScale;
-
-            if(j===0)ctx.moveTo(x,y);
+            if(i===0)ctx.moveTo(x,y);
             else ctx.lineTo(x,y);
         }
 
-        ctx.globalAlpha=
-            .055+
-            .21*(1-q);
-
+        ctx.globalAlpha=.07+.23*(1-q);
         ctx.strokeStyle=
-            ri%3===0
-                ?"rgba(255,205,239,1)"
-                :"rgba(216,121,222,1)";
+            ri<5
+                ?"rgba(255,225,243,1)"
+                :"rgba(212,118,211,1)";
 
-        ctx.lineWidth=
-            ri<7?1:.65;
-
+        ctx.lineWidth=ri<5?.85:.5;
         ctx.stroke();
     }
 
-    ctx.setLineDash([]);
+    for(const d of floorDots){
+        const r=d.r*maxR;
 
-    /*
-     * 地面星点
-     */
-    const pointCount=W<700?400:1050;
+        const x=layout.cx+Math.cos(d.a)*r;
+        const y=floorY+Math.sin(d.a)*r*sy;
 
-    ctx.fillStyle="rgba(246,183,231,.82)";
-
-    for(let i=0;i<pointCount;i++){
-        const hash1=(i*12.9898)%1;
-        const hash2=(i*78.233)%1;
-
-        const r=
-            Math.sqrt(
-                (Math.sin(i*91.7)*43758.5453)%1
-            );
-
-        const rr=
-            Math.abs(r)*
-            maxR;
-
-        const a=
-            (
-                Math.abs(
-                    Math.sin(i*51.91)*923.3
-                )%1
-            )*
-            TAU;
-
-        const x=
-            cx+
-            Math.cos(a)*rr;
-
-        const y=
-            floorY+
-            Math.sin(a)*rr*yScale;
-
-        ctx.globalAlpha=
-            .08+
-            .22*
-            (1-rr/maxR);
-
-        ctx.fillRect(
-            x,
-            y,
-            .7,
-            .7
-        );
+        ctx.globalAlpha=d.alpha*(1-d.r*.7);
+        ctx.fillStyle="rgba(245,183,228,1)";
+        ctx.fillRect(x,y,d.size,d.size);
     }
 
-    ctx.globalAlpha=1;
-
-    /*
-     * 中央光环
-     */
-    for(let i=0;i<7;i++){
-        const pulse=
+    for(let i=0;i<6;i++){
+        const breathe=
             1+
-            Math.sin(
-                t*1.35-
-                i*.55
-            )*.045;
+            Math.sin(t*1.25-i*.62)*.035;
 
-        const rx=
-            (13+i*12)*
-            pulse;
+        const rx=(9+i*10)*breathe;
+        const ry=(2.0+i*1.9)*breathe;
 
-        const ry=
-            (2.8+i*2.2)*
-            pulse;
-
-        ctx.globalAlpha=
-            .28-
-            i*.027;
-
+        ctx.globalAlpha=.34-i*.042;
         ctx.strokeStyle=
             i<2
-                ?"rgba(255,244,251,1)"
-                :"rgba(255,142,215,1)";
+                ?"rgba(255,246,251,1)"
+                :"rgba(255,147,215,1)";
 
-        ctx.lineWidth=
-            i<2?1.05:.75;
+        ctx.lineWidth=i<2?.95:.65;
 
         ctx.beginPath();
         ctx.ellipse(
-            cx,
+            layout.cx,
             floorY,
-            rx,
-            ry,
-            0,
-            0,
-            TAU
+            rx,ry,
+            0,0,TAU
         );
         ctx.stroke();
     }
+
+    drawTipStream(t,tip.x,tip.y,floorY,layout.scale);
 
     ctx.restore();
 }
 
-function drawStream(t,cx,tipY,floorY,scale){
+function drawTipStream(t,x,tipY,floorY,scale){
+    const gap=floorY-tipY;
+
+    if(gap<=0)return;
+
     ctx.save();
     ctx.globalCompositeOperation="lighter";
 
-    /*
-     * 模糊能量柱
-     */
-    ctx.filter=`blur(${Math.max(5,scale*.45)}px)`;
+    for(const p of streamDust){
+        const q=normU(p.q+t*.08);
 
-    let gradient=ctx.createLinearGradient(
-        cx,tipY,
-        cx,floorY
-    );
+        const middle=Math.sin(q*Math.PI);
 
-    gradient.addColorStop(
-        0,
-        "rgba(255,214,239,.18)"
-    );
+        const y=tipY+gap*q;
 
-    gradient.addColorStop(
-        .45,
-        "rgba(255,96,194,.12)"
-    );
+        const spread=
+            scale*.17*
+            middle;
 
-    gradient.addColorStop(
-        1,
-        "rgba(255,240,249,.30)"
-    );
-
-    ctx.strokeStyle=gradient;
-    ctx.lineWidth=Math.max(5,scale*.6);
-
-    ctx.beginPath();
-    ctx.moveTo(cx,tipY);
-    ctx.lineTo(cx,floorY);
-    ctx.stroke();
-
-    ctx.filter="none";
-
-    /*
-     * 粒子流
-     */
-    for(const p of streamParticles){
-        const q=
-            (
-                p.phase+
-                t*p.speed
-            )%1;
-
-        const middle=
-            Math.sin(q*Math.PI);
-
-        const y=
-            tipY+
-            (floorY-tipY)*q;
-
-        const width=
-            scale*
-            (
-                .10+
-                middle*.42
-            );
-
-        const x=
-            cx+
-            p.spread*
-            width+
+        const xx=
+            x+
             Math.sin(
+                p.phase+
                 t*1.7+
-                p.drift+
-                q*11
+                q*13
             )*
-            scale*.055;
+            spread+
+            gaussian()*.08;
 
-        const alpha=
+        ctx.globalAlpha=
             p.alpha*
             middle;
 
-        ctx.globalAlpha=alpha;
-
-        if(p.size<2.5){
-            ctx.fillStyle="rgba(255,224,241,.9)";
-            ctx.fillRect(
-                x,
-                y,
-                p.size,
-                p.size
-            );
+        if(p.size<1.5){
+            ctx.fillStyle="rgba(255,225,242,1)";
+            ctx.fillRect(xx,y,p.size,p.size);
         }else{
             const s=p.size;
-
             ctx.drawImage(
                 glowWhite,
-                x-s*.5,
-                y-s*.5,
+                xx-s/2,
+                y-s/2,
                 s,s
             );
         }
     }
 
-    /*
-     * 接地点强光
-     */
-    const groundGlow=
-        Math.max(
-            20,
-            scale*2.5
-        );
-
-    ctx.globalAlpha=.72;
+    ctx.globalAlpha=.20;
 
     ctx.drawImage(
         glowWhite,
-        cx-groundGlow*.5,
-        floorY-groundGlow*.5,
-        groundGlow,
-        groundGlow
+        x-scale*.55,
+        floorY-scale*.55,
+        scale*1.1,
+        scale*1.1
     );
 
-    ctx.globalAlpha=1;
+    ctx.restore();
+}
+
+function drawMist(layout){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+
+    const s=Math.min(W,H)*.42;
+
+    ctx.globalAlpha=.12;
+    ctx.drawImage(
+        glowSoft,
+        layout.cx-s/2,
+        layout.cy-s*.44,
+        s,s
+    );
+
     ctx.restore();
 }
 
 function drawVignette(){
     ctx.save();
-
     ctx.globalCompositeOperation="source-over";
 
-    const g=
-        ctx.createRadialGradient(
-            W*.5,
-            H*.46,
-            Math.min(W,H)*.18,
-            W*.5,
-            H*.46,
-            Math.max(W,H)*.72
-        );
+    const r=Math.max(W,H)*.72;
+
+    const g=ctx.createRadialGradient(
+        W*.5,H*.44,
+        Math.min(W,H)*.23,
+        W*.5,H*.44,
+        r
+    );
 
     g.addColorStop(0,"rgba(0,0,0,0)");
-    g.addColorStop(.6,"rgba(0,0,0,.04)");
-    g.addColorStop(1,"rgba(0,0,0,.72)");
+    g.addColorStop(.62,"rgba(0,0,0,.025)");
+    g.addColorStop(1,"rgba(0,0,0,.58)");
 
     ctx.fillStyle=g;
     ctx.fillRect(0,0,W,H);
@@ -1041,150 +1075,54 @@ function drawVignette(){
     ctx.restore();
 }
 
-let lastTime=performance.now();
+function animate(now){
+    requestAnimationFrame(animate);
 
-function frame(now){
-    requestAnimationFrame(frame);
-
-    const dt=Math.min(
-        (now-lastTime)/1000,
-        .033
-    );
-
+    const dt=Math.min((now-lastTime)/1000,.033);
     lastTime=now;
 
     const t=now*.001;
 
-    mouseX+=
-        (targetMouseX-mouseX)*
-        .025;
+    mouseX+=(targetMouseX-mouseX)*.025;
+    mouseY+=(targetMouseY-mouseY)*.025;
 
-    mouseY+=
-        (targetMouseY-mouseY)*
-        .025;
-
-    const {cx,cy,scale}=layout();
-
+    const layout=getLayout();
     const pulse=heartbeat(t);
 
-    const tipY=
-        getHeartBottom(
-            cx,
-            cy,
-            scale,
-            pulse
-        );
-
-    const floorY=
-        Math.min(
-            H*.82,
-            tipY+
-            Math.max(
-                25,
-                H*.12
-            )
-        );
-
-    drawBackground(t);
-
-    /*
-     * 顺序非常重要：
-     * 背景射线 -> 地面 -> 心体 glow -> 内部 -> 心粒子 -> 能量柱
-     */
-    drawRays(
-        t,
-        cx,
-        cy,
-        scale,
-        pulse
-    );
-
-    drawFloor(
-        t,
-        cx,
-        floorY
-    );
-
-    drawHeartGlow(
-        cx,
-        cy,
-        scale,
-        pulse
-    );
-
-    drawInterior(
-        t,
-        cx,
-        cy,
-        scale,
-        pulse
-    );
-
-    drawHeartParticles(
-        t,
-        cx,
-        cy,
-        scale,
-        pulse
-    );
-
-    drawHotContour(
-        cx,
-        cy,
-        scale,
-        pulse
-    );
-
-    drawStream(
-        t,
-        cx,
-        tipY,
-        floorY,
-        scale
-    );
-
+    drawBackground(t,layout);
+    drawMist(layout);
+    drawRays(t,layout,pulse);
+    drawFloor(t,layout,pulse);
+    drawDust(t,layout,pulse);
+    updateFlow(t,dt,layout,pulse);
+    drawRibbons(t,layout,pulse);
+    updateBursts(t,dt,layout,pulse);
     drawVignette();
+
+    firstFrame=false;
 }
 
-window.addEventListener(
-    "pointermove",
-    e=>{
-        targetMouseX=
-            (
-                e.clientX/W-.5
-            )*2;
+addEventListener("pointermove",e=>{
+    targetMouseX=(e.clientX/W-.5)*2;
+    targetMouseY=(e.clientY/H-.5)*2;
+},{passive:true});
 
-        targetMouseY=
-            (
-                e.clientY/H-.5
-            )*2;
-    },
-    {passive:true}
-);
+addEventListener("pointerleave",()=>{
+    targetMouseX=0;
+    targetMouseY=0;
+},{passive:true});
 
-window.addEventListener(
-    "pointerleave",
-    ()=>{
-        targetMouseX=0;
-        targetMouseY=0;
-    }
-);
+let resizeTimer=null;
 
-let resizeTimer;
-
-window.addEventListener(
-    "resize",
-    ()=>{
-        clearTimeout(resizeTimer);
-        resizeTimer=setTimeout(resize,100);
-    }
-);
+addEventListener("resize",()=>{
+    clearTimeout(resizeTimer);
+    resizeTimer=setTimeout(resize,120);
+},{passive:true});
 
 buildCurve();
 createSprites();
 resize();
-
-requestAnimationFrame(frame);
+requestAnimationFrame(animate);
 
 })();
 </script>
