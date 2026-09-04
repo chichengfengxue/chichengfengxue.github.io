@@ -7,876 +7,2772 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;overflow:hidden;background:#050208}
-body{background:radial-gradient(circle at 50% 34%,#241021 0,#0c0612 38%,#050208 72%)}
+body{background:radial-gradient(circle at 50% 36%,#21101f 0,#0c0612 38%,#050208 72%)}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .home{
-    position:fixed;left:22px;top:20px;z-index:10;
-    color:rgba(255,225,242,.25);text-decoration:none;
-    font:10px Arial,sans-serif;letter-spacing:3px;transition:.35s
+    position:fixed;
+    left:22px;
+    top:20px;
+    z-index:10;
+    color:rgba(255,225,242,.24);
+    text-decoration:none;
+    font:10px Arial,sans-serif;
+    letter-spacing:3px;
+    transition:.35s
 }
-.home:hover{color:#fff2fa;text-shadow:0 0 15px #ff6fbd}
+.home:hover{color:#fff3fa;text-shadow:0 0 16px #ff75c4}
 </style>
+
+<script type="importmap">
+{
+  "imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
 </head>
+
 <body>
+
 <a class="home" href="/">HOME</a>
-<canvas id="c"></canvas>
-<script>
-(()=>{
-"use strict";
 
-const canvas=document.getElementById("c");
-const ctx=canvas.getContext("2d",{alpha:false});
-const TAU=Math.PI*2;
-const CURVE_N=4096;
-let W=0,H=0,DPR=1,last=performance.now();
-let mx=0,my=0,tmx=0,tmy=0;
-let first=true,beatWasHigh=false;
+<script type="module">
+import * as THREE from "three";
+import {EffectComposer} from "three/addons/postprocessing/EffectComposer.js";
+import {RenderPass} from "three/addons/postprocessing/RenderPass.js";
+import {UnrealBloomPass} from "three/addons/postprocessing/UnrealBloomPass.js";
+import {OutputPass} from "three/addons/postprocessing/OutputPass.js";
 
-const cxArr=new Float32Array(CURVE_N);
-const cyArr=new Float32Array(CURVE_N);
-const nxArr=new Float32Array(CURVE_N);
-const nyArr=new Float32Array(CURVE_N);
-const txArr=new Float32Array(CURVE_N);
-const tyArr=new Float32Array(CURVE_N);
+const MOBILE=innerWidth<720;
 
-let flow=[];
-let inner=[];
-let ribbons=[];
-let comets=[];
-let sparks=[];
-let stars=[];
-let floorDust=[];
-let tipDust=[];
-let glowWhite,glowPink,glowPurple;
+const COUNT=MOBILE?18000:36000;
+const BURST_COUNT=MOBILE?2600:6500;
+const STAR_COUNT=MOBILE?650:1500;
 
-function rand(a,b){return a+Math.random()*(b-a)}
-function gauss(){return Math.random()+Math.random()+Math.random()+Math.random()-2}
-function norm(u){u%=1;return u<0?u+1:u}
-function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
+const LOOP=10.4;
+const FLOOR_Y=-11.8;
+const HEART_Y=2.8;
+
+const DPR=Math.min(
+    devicePixelRatio||1,
+    MOBILE?1.25:1.65
+);
+
+/* ============================================================
+   SCENE
+============================================================ */
+
+const scene=new THREE.Scene();
+
+scene.background=
+    new THREE.Color(0x050208);
+
+scene.fog=
+    new THREE.FogExp2(
+        0x050208,
+        .014
+    );
+
+const camera=
+    new THREE.PerspectiveCamera(
+        MOBILE?57:48,
+        innerWidth/innerHeight,
+        .1,
+        130
+    );
+
+camera.position.set(
+    0,
+    MOBILE?4.2:4.6,
+    MOBILE?43:38.5
+);
+
+camera.lookAt(
+    0,
+    .5,
+    0
+);
+
+const renderer=
+    new THREE.WebGLRenderer({
+        antialias:false,
+        powerPreference:"high-performance"
+    });
+
+renderer.setPixelRatio(DPR);
+
+renderer.setSize(
+    innerWidth,
+    innerHeight
+);
+
+renderer.outputColorSpace=
+    THREE.SRGBColorSpace;
+
+renderer.toneMapping=
+    THREE.ACESFilmicToneMapping;
+
+renderer.toneMappingExposure=
+    1.08;
+
+document.body.appendChild(
+    renderer.domElement
+);
+
+/* ============================================================
+   BLOOM
+============================================================ */
+
+const composer=
+    new EffectComposer(renderer);
+
+composer.addPass(
+    new RenderPass(
+        scene,
+        camera
+    )
+);
+
+const bloom=
+    new UnrealBloomPass(
+        new THREE.Vector2(
+            innerWidth,
+            innerHeight
+        ),
+        1.45,
+        .72,
+        .07
+    );
+
+bloom.threshold=.025;
+
+bloom.strength=
+    MOBILE?1.08:1.35;
+
+bloom.radius=.72;
+
+composer.addPass(bloom);
+
+composer.addPass(
+    new OutputPass()
+);
+
+/* ============================================================
+   HEART
+============================================================ */
+
+const heartGroup=
+    new THREE.Group();
+
+heartGroup.position.y=
+    HEART_Y;
+
+scene.add(
+    heartGroup
+);
 
 function heart(t){
-    const s=Math.sin(t);
+
+    const s=
+        Math.sin(t);
+
     return [
         16*s*s*s,
-        -(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))
+
+        13*Math.cos(t)
+        -5*Math.cos(2*t)
+        -2*Math.cos(3*t)
+        -Math.cos(4*t)
     ];
 }
 
-function buildCurve(){
-    for(let i=0;i<CURVE_N;i++){
-        const p=heart(i/CURVE_N*TAU);
-        cxArr[i]=p[0];
-        cyArr[i]=p[1];
-    }
-    for(let i=0;i<CURVE_N;i++){
-        const a=(i-3+CURVE_N)%CURVE_N;
-        const b=(i+3)%CURVE_N;
-        let dx=cxArr[b]-cxArr[a];
-        let dy=cyArr[b]-cyArr[a];
-        const l=Math.hypot(dx,dy)||1;
-        dx/=l;dy/=l;
-        let nx=-dy,ny=dx;
-        if(nx*cxArr[i]+ny*cyArr[i]<0){nx=-nx;ny=-ny}
-        nxArr[i]=nx;nyArr[i]=ny;
-        txArr[i]=-ny;tyArr[i]=nx;
-    }
+/*
+ * 参考常见社交平台动态粒子心实现里的
+ * scatter_inside 思路。
+ *
+ * 不只是沿轮廓撒粒子，
+ * 而是把一部分轮廓粒子向内部随机扩散。
+ */
+
+function scatterInside(
+    x,
+    y,
+    beta
+){
+
+    const rx=
+        Math.min(
+            .92,
+            -beta*
+            Math.log(
+                Math.max(
+                    1e-5,
+                    Math.random()
+                )
+            )
+        );
+
+    const ry=
+        Math.min(
+            .92,
+            -beta*
+            Math.log(
+                Math.max(
+                    1e-5,
+                    Math.random()
+                )
+            )
+        );
+
+    return [
+        x-rx*x,
+        y-ry*y
+    ];
 }
 
-function sample(u){
-    u=norm(u);
-    const f=u*CURVE_N;
-    const i=Math.floor(f)%CURVE_N;
-    const j=(i+1)%CURVE_N;
-    const a=f-Math.floor(f);
-    let nx=nxArr[i]+(nxArr[j]-nxArr[i])*a;
-    let ny=nyArr[i]+(nyArr[j]-nyArr[i])*a;
-    const l=Math.hypot(nx,ny)||1;
-    nx/=l;ny/=l;
-    return {
-        x:cxArr[i]+(cxArr[j]-cxArr[i])*a,
-        y:cyArr[i]+(cyArr[j]-cyArr[i])*a,
-        nx,ny,tx:-ny,ty:nx
-    };
-}
+function randn(){
 
-function sprite(size,c0,c1,c2){
-    const c=document.createElement("canvas");
-    c.width=c.height=size;
-    const g=c.getContext("2d");
-    const r=size/2;
-    const gr=g.createRadialGradient(r,r,0,r,r,r);
-    gr.addColorStop(0,c0);
-    gr.addColorStop(.08,c0);
-    gr.addColorStop(.25,c1);
-    gr.addColorStop(.58,c2);
-    gr.addColorStop(1,"rgba(255,70,180,0)");
-    g.fillStyle=gr;
-    g.fillRect(0,0,size,size);
-    return c;
-}
+    let u=0;
+    let v=0;
 
-function makeSprites(){
-    glowWhite=sprite(96,"rgba(255,255,255,1)","rgba(255,221,241,.95)","rgba(255,92,189,.13)");
-    glowPink=sprite(72,"rgba(255,241,250,.92)","rgba(255,116,198,.72)","rgba(229,63,169,.11)");
-    glowPurple=sprite(128,"rgba(255,120,204,.22)","rgba(194,55,169,.12)","rgba(104,30,129,.04)");
-}
+    while(u===0)
+        u=Math.random();
 
-function layout(){
-    const mobile=W<700;
-    const width=Math.min(W*(mobile?.84:.50),H*(mobile?.72:.72));
-    return {
-        x:W*.5+mx*5,
-        y:H*(mobile?.335:.335)+my*3,
-        s:width/32
-    };
-}
+    while(v===0)
+        v=Math.random();
 
-function beatInfo(t){
-    const q=t%1.48;
-    let b=0;
-    if(q<.10)b=Math.sin(q/.10*Math.PI);
-    if(q>.17&&q<.285)b+=.48*Math.sin((q-.17)/.115*Math.PI);
-    return {b,pulse:1+b*.022+Math.sin(t*.67)*.003};
-}
-
-function bandWidth(u,t,s){
-    return s*(
-        .62+
-        .10*Math.sin(u*TAU*3-t*.48)+
-        .065*Math.sin(u*TAU*7+t*.31)+
-        .038*Math.sin(u*TAU*15-t*.22)
+    return (
+        Math.sqrt(
+            -2*Math.log(u)
+        )*
+        Math.cos(
+            Math.PI*2*v
+        )
     );
 }
 
-function flowPos(p,t,L,pulse){
-    const c=sample(p.u);
-    const bw=bandWidth(p.u,t,L.s);
-    const braid=
-        Math.sin(p.u*TAU*6+t*p.braidSpeed+p.phase)*bw*.24+
-        Math.sin(p.u*TAU*17-t*.54+p.phase*1.7)*bw*.07;
-    const off=p.band*bw+braid;
+/* ============================================================
+   BUILD HEART PARTICLES
+============================================================ */
+
+function buildHeartData(count){
+
+    const heartPos=
+        new Float32Array(
+            count*3
+        );
+
+    const columnPos=
+        new Float32Array(
+            count*3
+        );
+
+    const seed=
+        new Float32Array(
+            count
+        );
+
+    const size=
+        new Float32Array(
+            count
+        );
+
+    const edge=
+        new Float32Array(
+            count
+        );
+
+    const colorMix=
+        new Float32Array(
+            count
+        );
+
+    for(
+        let i=0;
+        i<count;
+        i++
+    ){
+
+        const t=
+            Math.random()*
+            Math.PI*2;
+
+        let [x,y]=
+            heart(t);
+
+        const mode=
+            Math.random();
+
+        let e=0;
+        let z=0;
+
+        /*
+         * 外轮廓主粒子
+         */
+        if(mode<.43){
+
+            x+=randn()*.18;
+            y+=randn()*.18;
+
+            z=
+                randn()*.52;
+
+            e=1;
+
+        /*
+         * 边缘扩散层
+         */
+        }else if(mode<.82){
+
+            [x,y]=
+                scatterInside(
+                    x,
+                    y,
+                    .065+
+                    Math.random()*.055
+                );
+
+            x+=randn()*.10;
+            y+=randn()*.10;
+
+            z=
+                randn()*.85;
+
+            e=.72;
+
+        /*
+         * 内部星尘
+         */
+        }else{
+
+            [x,y]=
+                scatterInside(
+                    x,
+                    y,
+                    .18+
+                    Math.random()*.16
+                );
+
+            x+=randn()*.10;
+            y+=randn()*.10;
+
+            z=
+                randn()*1.35;
+
+            e=.30;
+        }
+
+        const scale=.66;
+
+        x*=scale;
+        y*=scale;
+        z*=scale;
+
+        const j=
+            i*3;
+
+        heartPos[j]=x;
+        heartPos[j+1]=y;
+        heartPos[j+2]=z;
+
+        /*
+         * 对应的“竖直能量柱”目标位置
+         */
+        const a=
+            Math.random()*
+            Math.PI*2;
+
+        const rr=
+            Math.pow(
+                Math.random(),
+                1.9
+            )*
+            (
+                e>.7
+                    ?.70
+                    :1.12
+            );
+
+        columnPos[j]=
+            Math.cos(a)*rr;
+
+        columnPos[j+1]=
+            THREE.MathUtils.lerp(
+                -8.4,
+                8.2,
+                Math.random()
+            );
+
+        columnPos[j+2]=
+            Math.sin(a)*rr;
+
+        seed[i]=
+            Math.random();
+
+        edge[i]=e;
+
+        colorMix[i]=
+            Math.random();
+
+        const s=
+            Math.random();
+
+        /*
+         * 绝大多数极小粒子
+         */
+        size[i]=
+            s<.83
+                ?.055+
+                Math.random()*.055
+
+            :s<.98
+                ?.11+
+                Math.random()*.07
+
+            :.20+
+            Math.random()*.12;
+    }
+
     return {
-        x:L.x+c.x*L.s*pulse+c.nx*off,
-        y:L.y+c.y*L.s*pulse+c.ny*off,
-        nx:c.nx,ny:c.ny,tx:c.tx,ty:c.ty
+        heartPos,
+        columnPos,
+        seed,
+        size,
+        edge,
+        colorMix
     };
 }
 
-function createFlow(){
-    flow=[];
-    const n=W<700?3600:8200;
-    const L=layout();
-    for(let i=0;i<n;i++){
-        const r=Math.random();
-        let band=gauss()*.49;
-        if(r>.82)band*=1.65;
-        if(r>.96)band*=2.3;
-        const p={
-            u:Math.random(),
-            band,
-            speed:rand(.025,.072)*(Math.random()<.09?-1:1),
-            phase:rand(0,TAU),
-            braidSpeed:rand(.65,1.45),
-            size:Math.random()<.90?rand(.42,1.05):rand(1.1,2),
-            alpha:rand(.42,1),
-            hot:Math.random()<.045,
-            x:0,y:0,px:0,py:0
-        };
-        const q=flowPos(p,0,L,1);
-        p.x=p.px=q.x;
-        p.y=p.py=q.y;
-        flow.push(p);
+const heartData=
+    buildHeartData(
+        COUNT
+    );
+
+const heartGeo=
+    new THREE.BufferGeometry();
+
+heartGeo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(
+        new Float32Array(
+            COUNT*3
+        ),
+        3
+    )
+);
+
+heartGeo.setAttribute(
+    "aHeart",
+    new THREE.BufferAttribute(
+        heartData.heartPos,
+        3
+    )
+);
+
+heartGeo.setAttribute(
+    "aColumn",
+    new THREE.BufferAttribute(
+        heartData.columnPos,
+        3
+    )
+);
+
+heartGeo.setAttribute(
+    "aSeed",
+    new THREE.BufferAttribute(
+        heartData.seed,
+        1
+    )
+);
+
+heartGeo.setAttribute(
+    "aSize",
+    new THREE.BufferAttribute(
+        heartData.size,
+        1
+    )
+);
+
+heartGeo.setAttribute(
+    "aEdge",
+    new THREE.BufferAttribute(
+        heartData.edge,
+        1
+    )
+);
+
+heartGeo.setAttribute(
+    "aColorMix",
+    new THREE.BufferAttribute(
+        heartData.colorMix,
+        1
+    )
+);
+
+/* ============================================================
+   GLSL COMMON
+============================================================ */
+
+const common=`
+
+float smoother(
+    float a,
+    float b,
+    float x
+){
+    float t=
+        clamp(
+            (x-a)/(b-a),
+            0.0,
+            1.0
+        );
+
+    return
+        t*t*t*
+        (
+            t*
+            (
+                t*6.0-15.0
+            )
+            +10.0
+        );
+}
+
+float gaussPulse(
+    float x,
+    float c,
+    float w
+){
+    float q=
+        (x-c)/w;
+
+    return
+        exp(-q*q);
+}
+
+mat2 rot(float a){
+
+    float c=cos(a);
+    float s=sin(a);
+
+    return mat2(
+        c,-s,
+        s,c
+    );
+}
+
+`;
+
+/* ============================================================
+   HEART VERTEX SHADER
+============================================================ */
+
+const heartVertex=`
+
+${common}
+
+attribute vec3 aHeart;
+attribute vec3 aColumn;
+
+attribute float aSeed;
+attribute float aSize;
+attribute float aEdge;
+attribute float aColorMix;
+
+uniform float uTime;
+uniform float uPixelRatio;
+uniform float uLayerSize;
+uniform float uLayerAlpha;
+
+varying vec3 vColor;
+varying float vAlpha;
+
+void main(){
+
+    float ph=
+        mod(
+            uTime,
+            ${LOOP.toFixed(3)}
+        );
+
+    /*
+     * ========================================================
+     * 动画时间线
+     *
+     * 0 - 3.8    正面稳定
+     * 3.8 - 5.2  向侧面旋转
+     * 5.2 - 6.1  压缩成竖直粒子柱
+     * 6.1 - 6.8  粒子柱
+     * 6.8 - 8.1  重新形成心形
+     * 8.1 - 8.85 转回正面
+     * 8.85+      爆发
+     * ========================================================
+     */
+
+    float collapse=
+        smoother(
+            5.20,
+            6.10,
+            ph
+        );
+
+    float reform=
+        smoother(
+            6.80,
+            8.10,
+            ph
+        );
+
+    float heartMix=
+        clamp(
+            1.0-
+            collapse+
+            reform,
+            0.0,
+            1.0
+        );
+
+    vec3 hp=
+        aHeart;
+
+    vec3 cp=
+        aColumn;
+
+    /*
+     * 微弱呼吸
+     */
+
+    float breathe=
+        1.0+
+        sin(
+            uTime*1.15+
+            aSeed*4.0
+        )*.008;
+
+    /*
+     * 双心跳
+     */
+
+    float beat1=
+        gaussPulse(
+            mod(
+                uTime,
+                1.48
+            ),
+            .12,
+            .075
+        );
+
+    float beat2=
+        .48*
+        gaussPulse(
+            mod(
+                uTime,
+                1.48
+            ),
+            .30,
+            .085
+        );
+
+    float beat=
+        (
+            beat1+
+            beat2
+        )*
+        heartMix;
+
+    hp.xy*=
+        breathe*
+        (
+            1.0+
+            beat*.025
+        );
+
+    /*
+     * 粒子不断微微流动
+     */
+
+    float jitterAmp=
+        mix(
+            .020,
+            .085,
+            aEdge
+        );
+
+    hp.x+=
+        sin(
+            uTime*1.7+
+            aSeed*41.0+
+            hp.y*.65
+        )*
+        jitterAmp;
+
+    hp.y+=
+        cos(
+            uTime*1.35+
+            aSeed*31.0+
+            hp.x*.55
+        )*
+        jitterAmp;
+
+    hp.z+=
+        sin(
+            uTime*.9+
+            aSeed*27.0
+        )*
+        jitterAmp*.65;
+
+    /*
+     * ========================================================
+     * 3D 旋转
+     * ========================================================
+     */
+
+    float rotY=
+        .025*
+        sin(ph*.55);
+
+    /*
+     * 开始转向侧面
+     */
+
+    if(
+        ph>=3.80 &&
+        ph<5.20
+    ){
+
+        rotY=
+            mix(
+                .02,
+                1.43,
+                smoother(
+                    3.80,
+                    5.20,
+                    ph
+                )
+            );
+
+    /*
+     * 保持侧面
+     */
+
+    }else if(
+        ph>=5.20 &&
+        ph<6.80
+    ){
+
+        rotY=
+            1.43;
+
+    /*
+     * 心开始重新出现
+     */
+
+    }else if(
+        ph>=6.80 &&
+        ph<8.10
+    ){
+
+        rotY=
+            mix(
+                1.43,
+                .90,
+                smoother(
+                    6.80,
+                    8.10,
+                    ph
+                )
+            );
+
+    /*
+     * 转回正面
+     */
+
+    }else if(
+        ph>=8.10 &&
+        ph<8.85
+    ){
+
+        rotY=
+            mix(
+                .90,
+                .02,
+                smoother(
+                    8.10,
+                    8.85,
+                    ph
+                )
+            );
+
+    }else if(
+        ph>=8.85
+    ){
+
+        rotY=
+            .02;
     }
+
+    hp.xz=
+        rot(rotY)*
+        hp.xz;
+
+    /*
+     * ========================================================
+     * 能量柱本身不是死的
+     *
+     * 会有螺旋扰动
+     * ========================================================
+     */
+
+    float columnTwist=
+        uTime*.72+
+        aSeed*6.28318;
+
+    cp.xz=
+        rot(
+            columnTwist*.18
+        )*
+        cp.xz;
+
+    cp.x+=
+        sin(
+            cp.y*.72-
+            uTime*2.2+
+            aSeed*16.0
+        )*.10;
+
+    cp.z+=
+        cos(
+            cp.y*.64+
+            uTime*1.7+
+            aSeed*13.0
+        )*.10;
+
+    /*
+     * 心 <-> 能量柱
+     */
+
+    vec3 p=
+        mix(
+            cp,
+            hp,
+            heartMix
+        );
+
+    /*
+     * 重组完成后的能量冲击
+     */
+
+    float reveal=
+        gaussPulse(
+            ph,
+            8.95,
+            .34
+        );
+
+    p.xy*=
+        1.0+
+        reveal*
+        .035*
+        aEdge;
+
+    vec4 mv=
+        modelViewMatrix*
+        vec4(
+            p,
+            1.0
+        );
+
+    float perspective=
+        44.0/
+        max(
+            7.0,
+            -mv.z
+        );
+
+    float hot=
+        smoothstep(
+            .965,
+            1.0,
+            aSeed
+        )*.70+
+        reveal*
+        .55*
+        aEdge;
+
+    gl_PointSize=
+        clamp(
+            aSize*
+            uLayerSize*
+            uPixelRatio*
+            perspective,
+            .45,
+            8.0
+        );
+
+    gl_Position=
+        projectionMatrix*
+        mv;
+
+    /*
+     * ========================================================
+     * COLOR
+     * ========================================================
+     */
+
+    vec3 purple=
+        vec3(
+            .63,
+            .20,
+            .66
+        );
+
+    vec3 pink=
+        vec3(
+            1.0,
+            .34,
+            .72
+        );
+
+    vec3 pale=
+        vec3(
+            1.0,
+            .74,
+            .90
+        );
+
+    vec3 white=
+        vec3(
+            1.0,
+            .985,
+            1.0
+        );
+
+    vec3 col=
+        mix(
+            purple,
+            pink,
+            .52+
+            .30*
+            aColorMix
+        );
+
+    col=
+        mix(
+            col,
+            pale,
+            aEdge*.58
+        );
+
+    col=
+        mix(
+            col,
+            white,
+            clamp(
+                hot,
+                0.0,
+                1.0
+            )
+        );
+
+    float twinkle=
+        .70+
+        .30*
+        sin(
+            uTime*
+            (
+                1.4+
+                aSeed*2.4
+            )+
+            aSeed*39.0
+        );
+
+    float columnAlpha=
+        mix(
+            .48,
+            .86,
+            aEdge
+        );
+
+    float heartAlpha=
+        mix(
+            .24,
+            1.0,
+            aEdge
+        );
+
+    vAlpha=
+        mix(
+            columnAlpha,
+            heartAlpha,
+            heartMix
+        )*
+        twinkle*
+        uLayerAlpha;
+
+    vColor=col;
 }
 
-function createInner(){
-    inner=[];
-    const n=W<700?650:1600;
-    for(let i=0;i<n;i++){
-        inner.push({
-            u:Math.random(),
-            r:Math.pow(Math.random(),.58)*.79,
-            phase:rand(0,TAU),
-            size:Math.random()<.94?rand(.4,1):rand(2,4),
-            alpha:rand(.05,.32)
-        });
-    }
+`;
+
+/* ============================================================
+   HEART FRAGMENT
+============================================================ */
+
+const heartFrag=`
+
+precision highp float;
+
+varying vec3 vColor;
+varying float vAlpha;
+
+uniform float uSoft;
+
+void main(){
+
+    vec2 p=
+        gl_PointCoord-
+        .5;
+
+    float d=
+        length(p);
+
+    if(d>.5)
+        discard;
+
+    float core=
+        exp(
+            -d*d*44.0
+        );
+
+    float soft=
+        exp(
+            -d*d*9.0
+        );
+
+    float a=
+        mix(
+            core,
+            soft,
+            uSoft
+        )*
+        vAlpha;
+
+    gl_FragColor=
+        vec4(
+            vColor,
+            a
+        );
 }
 
-function createRibbons(){
-    ribbons=[];
-    const n=W<700?11:23;
-    for(let i=0;i<n;i++){
-        ribbons.push({
-            u:Math.random(),
-            speed:rand(.045,.11)*(Math.random()<.18?-1:1),
-            len:rand(.025,.075),
-            band:gauss()*.32,
-            phase:rand(0,TAU),
-            width:rand(.55,1.45),
-            alpha:rand(.12,.42)
-        });
-    }
-}
+`;
 
-function resetComet(c,L,t,pulse,initial=false){
-    const u=Math.random();
-    const h=sample(u);
-    const bw=bandWidth(u,t,L.s);
-    const off=gauss()*bw*.72;
-    const x=L.x+h.x*L.s*pulse+h.nx*off;
-    const y=L.y+h.y*L.s*pulse+h.ny*off;
+function makeHeartMaterial(
+    layerSize,
+    layerAlpha,
+    soft
+){
 
-    const outward=rand(80,230);
-    const tangent=rand(-125,125);
+    return new THREE.ShaderMaterial({
 
-    c.x=x;c.y=y;c.px=x;c.py=y;
-    c.vx=h.nx*outward+h.tx*tangent;
-    c.vy=h.ny*outward+h.ty*tangent;
-    c.life=rand(.70,1.65);
-    c.age=initial?Math.random()*c.life:0;
-    c.phase=rand(0,TAU);
-    c.curve=rand(.55,1.6)*(Math.random()<.5?-1:1);
-    c.alpha=rand(.18,.65);
-    c.width=rand(.45,1.25);
-    c.hot=Math.random()<.20;
-    c.history=[];
-    for(let j=0;j<14;j++)c.history.push({x,y});
-}
+        vertexShader:
+            heartVertex,
 
-function createComets(){
-    comets=[];
-    const L=layout();
-    const n=W<700?85:190;
-    for(let i=0;i<n;i++){
-        const c={};
-        resetComet(c,L,0,1,true);
-        comets.push(c);
-    }
-}
+        fragmentShader:
+            heartFrag,
 
-function createSparks(){
-    sparks=[];
-}
+        uniforms:{
 
-function createStars(){
-    stars=[];
-    const n=W<700?320:850;
-    for(let i=0;i<n;i++){
-        stars.push({
-            x:Math.random(),
-            y:Math.random(),
-            size:Math.random()<.97?rand(.35,.9):rand(1.5,3.5),
-            a:rand(.025,.24),
-            phase:rand(0,TAU),
-            drift:rand(.4,1.2)
-        });
-    }
-}
+            uTime:{
+                value:0
+            },
 
-function createFloor(){
-    floorDust=[];
-    const n=W<700?500:1350;
-    for(let i=0;i<n;i++){
-        floorDust.push({
-            r:Math.sqrt(Math.random()),
-            a:Math.random()*TAU,
-            alpha:rand(.04,.22),
-            size:rand(.35,.85)
-        });
-    }
-    tipDust=[];
-    const k=W<700?90:210;
-    for(let i=0;i<k;i++){
-        tipDust.push({
-            q:Math.random(),
-            phase:rand(0,TAU),
-            size:Math.random()<.92?rand(.45,1):rand(2,4),
-            alpha:rand(.18,.80)
-        });
-    }
-}
+            uPixelRatio:{
+                value:DPR
+            },
 
-function recreate(){
-    createFlow();
-    createInner();
-    createRibbons();
-    createComets();
-    createSparks();
-    createStars();
-    createFloor();
-}
+            uLayerSize:{
+                value:layerSize
+            },
 
-function resize(){
-    W=innerWidth;
-    H=innerHeight;
-    DPR=Math.min(devicePixelRatio||1,1.7);
-    canvas.width=Math.round(W*DPR);
-    canvas.height=Math.round(H*DPR);
-    canvas.style.width=W+"px";
-    canvas.style.height=H+"px";
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-    first=true;
-    recreate();
-}
+            uLayerAlpha:{
+                value:layerAlpha
+            },
 
-function background(t,L){
-    ctx.globalCompositeOperation="source-over";
-    ctx.fillStyle=first?"#050208":"rgba(5,2,8,.24)";
-    ctx.fillRect(0,0,W,H);
-
-    const R=Math.max(W,H)*.48;
-    const g=ctx.createRadialGradient(L.x,L.y,0,L.x,L.y,R);
-    g.addColorStop(0,"rgba(91,28,74,.060)");
-    g.addColorStop(.33,"rgba(50,15,50,.032)");
-    g.addColorStop(.70,"rgba(14,6,22,.010)");
-    g.addColorStop(1,"rgba(0,0,0,0)");
-    ctx.fillStyle=g;
-    ctx.fillRect(0,0,W,H);
-
-    ctx.globalCompositeOperation="lighter";
-    for(const s of stars){
-        const y=norm(s.y+t*.0007*s.drift)*H;
-        const a=s.a*(.55+.45*Math.sin(t*.5+s.phase));
-        ctx.globalAlpha=a;
-        ctx.fillStyle="#f6a8d7";
-        const x=s.x*W;
-        if(s.size<1.4)ctx.fillRect(x,y,s.size,s.size);
-        else ctx.drawImage(glowPink,x-s.size,y-s.size,s.size*2,s.size*2);
-    }
-    ctx.globalAlpha=1;
-}
-
-function drawMist(L,t){
-    const s=Math.min(W,H)*.55;
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.globalAlpha=.075+.018*Math.sin(t*.6);
-    ctx.drawImage(glowPurple,L.x-s/2,L.y-s*.46,s,s);
-    ctx.restore();
-}
-
-function drawInner(t,L,pulse){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.fillStyle="#f59acb";
-
-    for(const p of inner){
-        const c=sample(p.u);
-        const drift=Math.sin(t*.35+p.phase)*L.s*.07;
-        const r=p.r+.007*Math.sin(t*.24+p.phase);
-
-        const x=L.x+c.x*L.s*r*pulse+c.nx*drift;
-        const y=L.y+c.y*L.s*r*pulse+c.ny*drift;
-
-        ctx.globalAlpha=p.alpha*(.5+.5*Math.sin(t*(.5+p.alpha)+p.phase));
-
-        if(p.size<1.4)ctx.fillRect(x,y,p.size,p.size);
-        else ctx.drawImage(glowPink,x-p.size,y-p.size,p.size*2,p.size*2);
-    }
-    ctx.restore();
-}
-
-function drawFlow(t,dt,L,pulse){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
-
-    const colors=["#fff0f8","#ff8fcb","#d948a0"];
-    const widths=[.82,.70,.55];
-
-    for(let layer=0;layer<3;layer++){
-        ctx.beginPath();
-
-        for(let i=layer;i<flow.length;i+=3){
-            const p=flow[i];
-
-            p.px=p.x;p.py=p.y;
-            p.u=norm(p.u+p.speed*dt);
-
-            const q=flowPos(p,t,L,pulse);
-
-            p.x=q.x;
-            p.y=q.y;
-
-            if(Math.hypot(p.x-p.px,p.y-p.py)<15){
-                ctx.moveTo(p.px,p.py);
-                ctx.lineTo(p.x,p.y);
+            uSoft:{
+                value:soft
             }
-        }
+        },
 
-        ctx.globalAlpha=layer===0?.34:layer===1?.25:.16;
-        ctx.strokeStyle=colors[layer];
-        ctx.lineWidth=widths[layer];
-        ctx.stroke();
+        transparent:true,
 
-        ctx.fillStyle=colors[layer];
-        ctx.globalAlpha=layer===0?.68:layer===1?.54:.40;
+        depthWrite:false,
 
-        for(let i=layer;i<flow.length;i+=6){
-            const p=flow[i];
-            ctx.fillRect(p.x,p.y,p.size,p.size);
-        }
-    }
+        depthTest:true,
 
-    for(let i=0;i<flow.length;i+=11){
-        const p=flow[i];
-        if(!p.hot)continue;
-        const s=rand(.88,1.12)*5;
-        ctx.globalAlpha=.24;
-        ctx.drawImage(glowWhite,p.x-s/2,p.y-s/2,s,s);
-    }
-
-    ctx.restore();
+        blending:
+            THREE.AdditiveBlending
+    });
 }
 
-function drawRibbons(t,L,pulse){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
-    ctx.lineJoin="round";
+/*
+ * 大范围极淡光晕
+ */
 
-    for(const r of ribbons){
-        r.u=norm(r.u+r.speed/60);
+const auraMat=
+    makeHeartMaterial(
+        4.6,
+        .065,
+        1
+    );
 
-        const steps=30;
-        let last=null;
+/*
+ * 主体
+ */
 
-        for(let i=0;i<steps;i++){
-            const q=i/(steps-1);
-            const sign=r.speed>0?1:-1;
-            const u=norm(r.u-r.len*q*sign);
-            const c=sample(u);
-            const bw=bandWidth(u,t,L.s);
+const heartMat=
+    makeHeartMaterial(
+        1,
+        .96,
+        .14
+    );
 
-            const offset=
-                r.band*bw+
-                Math.sin(u*TAU*10+t*1.05+r.phase)*bw*.19+
-                Math.sin(u*TAU*23-t*.46+r.phase)*bw*.05;
+const aura=
+    new THREE.Points(
+        heartGeo,
+        auraMat
+    );
 
-            const x=L.x+c.x*L.s*pulse+c.nx*offset;
-            const y=L.y+c.y*L.s*pulse+c.ny*offset;
+const heartPoints=
+    new THREE.Points(
+        heartGeo,
+        heartMat
+    );
 
-            if(last){
-                ctx.globalAlpha=r.alpha*Math.pow(1-q,1.55);
-                ctx.strokeStyle=q<.22?"#fff9fd":"#ff91cb";
-                ctx.lineWidth=r.width*(1-q*.70);
+aura.frustumCulled=false;
 
-                ctx.beginPath();
-                ctx.moveTo(last.x,last.y);
-                ctx.lineTo(x,y);
-                ctx.stroke();
-            }
+heartPoints.frustumCulled=false;
 
-            last={x,y};
-        }
+heartGroup.add(
+    aura,
+    heartPoints
+);
 
-        if(last){
-            ctx.globalAlpha=r.alpha*.22;
-            const s=6;
-            ctx.drawImage(glowWhite,last.x-s/2,last.y-s/2,s,s);
-        }
+/* ============================================================
+   EXPLOSION
+============================================================ */
+
+function buildBurstData(count){
+
+    const source=
+        new Float32Array(
+            count*3
+        );
+
+    const dir=
+        new Float32Array(
+            count*3
+        );
+
+    const seed=
+        new Float32Array(
+            count
+        );
+
+    const length=
+        new Float32Array(
+            count
+        );
+
+    const size=
+        new Float32Array(
+            count
+        );
+
+    for(
+        let i=0;
+        i<count;
+        i++
+    ){
+
+        const t=
+            Math.random()*
+            Math.PI*2;
+
+        let [x,y]=
+            heart(t);
+
+        const sc=.66;
+
+        x*=sc;
+        y*=sc;
+
+        x+=randn()*.28;
+        y+=randn()*.28;
+
+        const z=
+            randn()*.75;
+
+        const j=i*3;
+
+        source[j]=x;
+        source[j+1]=y;
+        source[j+2]=z;
+
+        /*
+         * 粒子主要向外，
+         * 同时具有切向偏移。
+         */
+
+        const l=
+            Math.hypot(
+                x,
+                y
+            )||1;
+
+        let dx=x/l;
+        let dy=y/l;
+
+        let dz=
+            randn()*.22;
+
+        const swirl=
+            (
+                Math.random()-.5
+            )*.22;
+
+        const tx=-dy;
+        const ty=dx;
+
+        dx+=tx*swirl;
+        dy+=ty*swirl;
+
+        const dl=
+            Math.hypot(
+                dx,
+                dy,
+                dz
+            )||1;
+
+        dir[j]=dx/dl;
+        dir[j+1]=dy/dl;
+        dir[j+2]=dz/dl;
+
+        seed[i]=
+            Math.random();
+
+        length[i]=
+            5+
+            Math.pow(
+                Math.random(),
+                .45
+            )*19;
+
+        size[i]=
+            .045+
+            Math.random()*.075;
     }
-
-    ctx.restore();
-}
-
-function fieldForce(x,y,t,L,phase,curve){
-    const dx=x-L.x;
-    const dy=y-L.y;
-    const r=Math.hypot(dx,dy)||1;
-
-    const rx=dx/r,ry=dy/r;
-    const tx=-ry,ty=rx;
-
-    const n1=Math.sin(x*.013+t*1.15+phase);
-    const n2=Math.cos(y*.016-t*.86+phase*1.7);
-    const n3=Math.sin((x+y)*.006+t*.53+phase*.7);
-
-    const swirl=(42+115/(1+r*.012))*curve;
-    const radial=20+16*Math.sin(t*.7+phase);
 
     return {
-        x:tx*swirl+rx*radial+(n1+n3*.5)*28,
-        y:ty*swirl+ry*radial+(n2-n3*.5)*28
+        source,
+        dir,
+        seed,
+        length,
+        size
     };
 }
 
-function updateComets(t,dt,L,pulse,beat){
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
-    ctx.lineJoin="round";
+const burstData=
+    buildBurstData(
+        BURST_COUNT
+    );
 
-    for(const c of comets){
-        c.age+=dt;
-        if(c.age>c.life||c.x<-100||c.x>W+100||c.y<-100||c.y>H+100){
-            resetComet(c,L,t,pulse,false);
-            continue;
+const burstGeo=
+    new THREE.BufferGeometry();
+
+burstGeo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(
+        new Float32Array(
+            BURST_COUNT*3
+        ),
+        3
+    )
+);
+
+burstGeo.setAttribute(
+    "aSource",
+    new THREE.BufferAttribute(
+        burstData.source,
+        3
+    )
+);
+
+burstGeo.setAttribute(
+    "aDir",
+    new THREE.BufferAttribute(
+        burstData.dir,
+        3
+    )
+);
+
+burstGeo.setAttribute(
+    "aSeed",
+    new THREE.BufferAttribute(
+        burstData.seed,
+        1
+    )
+);
+
+burstGeo.setAttribute(
+    "aLength",
+    new THREE.BufferAttribute(
+        burstData.length,
+        1
+    )
+);
+
+burstGeo.setAttribute(
+    "aSize",
+    new THREE.BufferAttribute(
+        burstData.size,
+        1
+    )
+);
+
+/* ============================================================
+   EXPLOSION SHADER
+============================================================ */
+
+const burstVertex=`
+
+${common}
+
+attribute vec3 aSource;
+attribute vec3 aDir;
+
+attribute float aSeed;
+attribute float aLength;
+attribute float aSize;
+
+uniform float uTime;
+uniform float uPixelRatio;
+uniform float uTrail;
+
+varying vec3 vColor;
+varying float vAlpha;
+
+void main(){
+
+    float ph=
+        mod(
+            uTime,
+            ${LOOP.toFixed(3)}
+        );
+
+    /*
+     * 爆发时间
+     */
+
+    float q=
+        clamp(
+            (
+                ph-
+                8.55
+            )/
+            1.12,
+            0.0,
+            1.0
+        );
+
+    /*
+     * 四层历史轨迹
+     *
+     * 不是一条呆板直线，
+     * 而是几份不同时间的粒子。
+     */
+
+    float local=
+        clamp(
+            q-
+            uTrail*
+            (
+                .035+
+                .055*
+                aSeed
+            ),
+            0.0,
+            1.0
+        );
+
+    float motion=
+        pow(
+            local,
+            .72
+        );
+
+    float fade=
+        smoother(
+            0.0,
+            .12,
+            local
+        )*
+        (
+            1.0-
+            smoother(
+                .58,
+                1.0,
+                local
+            )
+        );
+
+    vec3 p=
+        aSource+
+        aDir*
+        aLength*
+        motion;
+
+    /*
+     * 爆射路径略微弯曲
+     */
+
+    float curve=
+        sin(
+            local*
+            3.14159
+        )*
+        aLength*
+        (
+            .02+
+            .05*
+            aSeed
+        );
+
+    p.x+=
+        -aDir.y*
+        curve;
+
+    p.y+=
+        aDir.x*
+        curve;
+
+    p.z+=
+        sin(
+            aSeed*25.0+
+            local*8.0
+        )*
+        curve*.35;
+
+    vec4 mv=
+        modelViewMatrix*
+        vec4(
+            p,
+            1.0
+        );
+
+    float perspective=
+        44.0/
+        max(
+            7.0,
+            -mv.z
+        );
+
+    gl_PointSize=
+        clamp(
+            aSize*
+            uPixelRatio*
+            perspective*
+            (
+                1.0-
+                uTrail*.20
+            ),
+            .45,
+            3.0
+        );
+
+    gl_Position=
+        projectionMatrix*
+        mv;
+
+    float hot=
+        smoothstep(
+            .93,
+            1.0,
+            aSeed
+        );
+
+    vColor=
+        mix(
+            vec3(
+                1.0,
+                .34,
+                .72
+            ),
+            vec3(
+                1.0,
+                .95,
+                .99
+            ),
+            hot
+        );
+
+    vAlpha=
+        fade*
+        (
+            .18+
+            .62*
+            aSeed
+        )*
+        (
+            1.0-
+            uTrail*.19
+        );
+}
+
+`;
+
+const burstFrag=`
+
+precision highp float;
+
+varying vec3 vColor;
+varying float vAlpha;
+
+void main(){
+
+    vec2 p=
+        gl_PointCoord-
+        .5;
+
+    float d=
+        length(p);
+
+    if(d>.5)
+        discard;
+
+    float a=
+        exp(
+            -d*d*30.0
+        )*
+        vAlpha;
+
+    gl_FragColor=
+        vec4(
+            vColor,
+            a
+        );
+}
+
+`;
+
+function makeBurstMaterial(trail){
+
+    return new THREE.ShaderMaterial({
+
+        vertexShader:
+            burstVertex,
+
+        fragmentShader:
+            burstFrag,
+
+        uniforms:{
+
+            uTime:{
+                value:0
+            },
+
+            uPixelRatio:{
+                value:DPR
+            },
+
+            uTrail:{
+                value:trail
+            }
+        },
+
+        transparent:true,
+
+        depthWrite:false,
+
+        blending:
+            THREE.AdditiveBlending
+    });
+}
+
+/*
+ * 四份不同时间偏移，
+ * 形成真正的拖尾。
+ */
+
+const burstMats=[];
+
+for(
+    const trail of [
+        0,
+        1,
+        2,
+        3
+    ]
+){
+
+    const material=
+        makeBurstMaterial(
+            trail
+        );
+
+    burstMats.push(
+        material
+    );
+
+    const particles=
+        new THREE.Points(
+            burstGeo,
+            material
+        );
+
+    particles.frustumCulled=
+        false;
+
+    particles.position.y=
+        HEART_Y;
+
+    scene.add(
+        particles
+    );
+}
+
+/* ============================================================
+   ORBIT RINGS
+============================================================ */
+
+function createOrbitSystem(){
+
+    const group=
+        new THREE.Group();
+
+    group.position.y=
+        HEART_Y;
+
+    scene.add(
+        group
+    );
+
+    const rings=[];
+
+    const ringInfo=[
+
+        {
+            r:6.7,
+            y:-3.4,
+            tilt:.30,
+            speed:.68,
+            phase:.2
+        },
+
+        {
+            r:7.6,
+            y:-.8,
+            tilt:-.22,
+            speed:-.54,
+            phase:1.8
+        },
+
+        {
+            r:7.0,
+            y:2.0,
+            tilt:.28,
+            speed:.61,
+            phase:3.2
+        },
+
+        {
+            r:5.8,
+            y:4.5,
+            tilt:-.20,
+            speed:-.72,
+            phase:4.7
+        }
+    ];
+
+    for(
+        const info of
+        ringInfo
+    ){
+
+        const n=
+            MOBILE
+                ?260
+                :430;
+
+        const pos=
+            new Float32Array(
+                n*3
+            );
+
+        const seed=
+            new Float32Array(
+                n
+            );
+
+        for(
+            let i=0;
+            i<n;
+            i++
+        ){
+
+            const a=
+                i/n*
+                Math.PI*2;
+
+            pos[i*3]=
+                Math.cos(a)*
+                info.r;
+
+            pos[i*3+1]=
+                Math.sin(
+                    a*2+
+                    info.phase
+                )*.18;
+
+            pos[i*3+2]=
+                Math.sin(a)*
+                info.r;
+
+            seed[i]=
+                i/n;
         }
 
-        c.px=c.x;c.py=c.y;
+        const geometry=
+            new THREE.BufferGeometry();
 
-        const f=fieldForce(c.x,c.y,t,L,c.phase,c.curve);
+        geometry.setAttribute(
+            "position",
+            new THREE.BufferAttribute(
+                pos,
+                3
+            )
+        );
 
-        c.vx+=f.x*dt*(1+beat*.35);
-        c.vy+=f.y*dt*(1+beat*.35);
+        geometry.setAttribute(
+            "aSeed",
+            new THREE.BufferAttribute(
+                seed,
+                1
+            )
+        );
 
-        const drag=Math.pow(.988,dt*60);
-        c.vx*=drag;
-        c.vy*=drag;
+        const vertex=`
 
-        c.x+=c.vx*dt;
-        c.y+=c.vy*dt;
+        attribute float aSeed;
 
-        c.history.unshift({x:c.x,y:c.y});
-        if(c.history.length>14)c.history.pop();
+        uniform float uTime;
+        uniform float uPhase;
+        uniform float uPixelRatio;
 
-        const life=1-c.age/c.life;
+        varying float vAlpha;
+        varying vec3 vColor;
 
-        for(let j=1;j<c.history.length;j++){
-            const a=c.history[j-1];
-            const b=c.history[j];
+        void main(){
 
-            ctx.globalAlpha=
-                c.alpha*
-                life*
-                Math.pow(1-j/c.history.length,1.7)*
-                .44;
+            float ph=
+                mod(
+                    uTime,
+                    ${LOOP.toFixed(3)}
+                );
 
-            ctx.strokeStyle=
-                c.hot&&j<4
-                    ?"#fff7fc"
-                    :"#f05ab1";
+            /*
+             * 在爱心转侧面前出现，
+             * 重组成正面后消失。
+             */
 
-            ctx.lineWidth=
-                c.width*
-                (1-j/c.history.length*.75);
+            float appear=
+                smoothstep(
+                    3.55,
+                    4.55,
+                    ph
+                );
 
-            ctx.beginPath();
-            ctx.moveTo(a.x,a.y);
-            ctx.lineTo(b.x,b.y);
-            ctx.stroke();
+            float disappear=
+                1.0-
+                smoothstep(
+                    8.25,
+                    9.10,
+                    ph
+                );
+
+            float vis=
+                appear*
+                disappear;
+
+            vec3 p=
+                position;
+
+            /*
+             * 光环不是完全固定的圆
+             */
+
+            p.y+=
+                sin(
+                    aSeed*25.1327-
+                    uTime*1.2+
+                    uPhase
+                )*.10;
+
+            vec4 mv=
+                modelViewMatrix*
+                vec4(
+                    p,
+                    1.0
+                );
+
+            gl_PointSize=
+                clamp(
+                    (
+                        .055+
+                        .035*
+                        sin(
+                            aSeed*40.0+
+                            uTime*2.0
+                        )
+                    )*
+                    uPixelRatio*
+                    45.0/
+                    max(
+                        7.0,
+                        -mv.z
+                    ),
+                    .45,
+                    2.3
+                );
+
+            gl_Position=
+                projectionMatrix*
+                mv;
+
+            vAlpha=
+                vis*
+                (
+                    .32+
+                    .50*
+                    pow(
+                        .5+
+                        .5*
+                        sin(
+                            aSeed*31.0+
+                            uTime*2.4
+                        ),
+                        3.0
+                    )
+                );
+
+            vColor=
+                mix(
+                    vec3(
+                        1.0,
+                        .34,
+                        .72
+                    ),
+                    vec3(
+                        1.0,
+                        .90,
+                        .97
+                    ),
+                    pow(
+                        .5+
+                        .5*
+                        sin(
+                            aSeed*17.0+
+                            uPhase
+                        ),
+                        5.0
+                    )
+                );
         }
 
-        const head=c.hot?7:3.5;
-        ctx.globalAlpha=c.alpha*life*(c.hot?.72:.35);
+        `;
 
-        ctx.drawImage(
-            c.hot?glowWhite:glowPink,
-            c.x-head/2,
-            c.y-head/2,
-            head,head
+        const fragment=`
+
+        precision highp float;
+
+        varying float vAlpha;
+        varying vec3 vColor;
+
+        void main(){
+
+            vec2 p=
+                gl_PointCoord-
+                .5;
+
+            float d=
+                length(p);
+
+            if(d>.5)
+                discard;
+
+            gl_FragColor=
+                vec4(
+                    vColor,
+                    exp(
+                        -d*d*26.0
+                    )*
+                    vAlpha
+                );
+        }
+
+        `;
+
+        const material=
+            new THREE.ShaderMaterial({
+
+                vertexShader:
+                    vertex,
+
+                fragmentShader:
+                    fragment,
+
+                uniforms:{
+
+                    uTime:{
+                        value:0
+                    },
+
+                    uPhase:{
+                        value:
+                            info.phase
+                    },
+
+                    uPixelRatio:{
+                        value:DPR
+                    }
+                },
+
+                transparent:true,
+
+                depthWrite:false,
+
+                blending:
+                    THREE.AdditiveBlending
+            });
+
+        const points=
+            new THREE.Points(
+                geometry,
+                material
+            );
+
+        points.position.y=
+            info.y;
+
+        points.rotation.x=
+            info.tilt;
+
+        points.userData=
+            info;
+
+        points.frustumCulled=
+            false;
+
+        group.add(
+            points
+        );
+
+        rings.push(
+            points
         );
     }
 
-    ctx.restore();
+    return {
+        group,
+        rings
+    };
 }
 
-function spawnBeatBurst(t,L,pulse){
-    const count=W<700?70:165;
+const orbit=
+    createOrbitSystem();
 
-    for(let i=0;i<count;i++){
-        const u=Math.random();
-        const c=sample(u);
-        const bw=bandWidth(u,t,L.s);
-        const off=gauss()*bw*.55;
+/* ============================================================
+   FLOOR
+============================================================ */
 
-        const x=L.x+c.x*L.s*pulse+c.nx*off;
-        const y=L.y+c.y*L.s*pulse+c.ny*off;
+function createFloor(){
 
-        const speed=rand(55,190);
+    const group=
+        new THREE.Group();
 
-        sparks.push({
-            x,y,px:x,py:y,
-            vx:c.nx*speed+c.tx*rand(-90,90),
-            vy:c.ny*speed+c.ty*rand(-90,90),
-            age:0,
-            life:rand(.45,1.15),
-            phase:rand(0,TAU),
-            hot:Math.random()<.15,
-            size:rand(.4,1.25)
+    scene.add(group);
+
+    const materialFar=
+        new THREE.LineBasicMaterial({
+
+            color:
+                0x9e4fa9,
+
+            transparent:true,
+
+            opacity:.11,
+
+            depthWrite:false,
+
+            blending:
+                THREE.AdditiveBlending
         });
-    }
-}
 
-function updateSparks(t,dt,L){
-    if(sparks.length>900)sparks.splice(0,sparks.length-900);
+    const materialNear=
+        new THREE.LineBasicMaterial({
 
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
+            color:
+                0xf3b0dc,
 
-    for(let i=sparks.length-1;i>=0;i--){
-        const p=sparks[i];
-        p.age+=dt;
+            transparent:true,
 
-        if(p.age>p.life){
-            sparks.splice(i,1);
-            continue;
-        }
+            opacity:.26,
 
-        p.px=p.x;p.py=p.y;
+            depthWrite:false,
 
-        const f=fieldForce(p.x,p.y,t,L,p.phase,.45);
-        p.vx+=f.x*dt*.42;
-        p.vy+=f.y*dt*.42;
+            blending:
+                THREE.AdditiveBlending
+        });
 
-        p.vx*=Math.pow(.978,dt*60);
-        p.vy*=Math.pow(.978,dt*60);
+    /*
+     * 花瓣式波纹
+     */
 
-        p.x+=p.vx*dt;
-        p.y+=p.vy*dt;
+    const ringCount=
+        MOBILE
+            ?18
+            :27;
 
-        const life=1-p.age/p.life;
+    for(
+        let ri=1;
+        ri<=ringCount;
+        ri++
+    ){
 
-        ctx.globalAlpha=life*.25;
-        ctx.strokeStyle=p.hot?"#fff6fb":"#ff62b8";
-        ctx.lineWidth=.55;
+        const q=
+            ri/ringCount;
 
-        ctx.beginPath();
-        ctx.moveTo(p.px,p.py);
-        ctx.lineTo(p.x,p.y);
-        ctx.stroke();
+        const base=
+            .55+
+            Math.pow(
+                q,
+                1.28
+            )*23;
 
-        ctx.globalAlpha=life*(p.hot?.8:.55);
+        const points=[];
 
-        if(p.hot){
-            const s=4;
-            ctx.drawImage(glowWhite,p.x-s/2,p.y-s/2,s,s);
-        }else{
-            ctx.fillStyle="#ffadd7";
-            ctx.fillRect(p.x,p.y,p.size,p.size);
-        }
-    }
+        const segments=
+            MOBILE
+                ?110
+                :180;
 
-    ctx.restore();
-}
+        for(
+            let i=0;
+            i<segments;
+            i++
+        ){
 
-function bottomPoint(L,pulse){
-    const c=sample(.5);
-    return {x:L.x+c.x*L.s*pulse,y:L.y+c.y*L.s*pulse};
-}
+            const a=
+                i/
+                segments*
+                Math.PI*2;
 
-function drawFloor(t,L,pulse,beat){
-    const tip=bottomPoint(L,pulse);
-    const fy=tip.y+Math.max(16,L.s*.72);
-    const maxR=Math.min(W*(W<700?.62:.39),H*.43);
-    const sy=.19;
-
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-
-    const g=ctx.createRadialGradient(L.x,fy,0,L.x,fy,maxR*.75);
-    g.addColorStop(0,"rgba(255,190,230,.075)");
-    g.addColorStop(.30,"rgba(209,77,190,.024)");
-    g.addColorStop(1,"rgba(100,20,120,0)");
-    ctx.fillStyle=g;
-    ctx.fillRect(L.x-maxR,fy-maxR*.26,maxR*2,maxR*.52);
-
-    const spokes=W<700?38:58;
-
-    for(let i=0;i<spokes;i++){
-        const a=i/spokes*TAU+t*.025;
-        const x2=L.x+Math.cos(a)*maxR;
-        const y2=fy+Math.sin(a)*maxR*sy;
-
-        const grad=ctx.createLinearGradient(L.x,fy,x2,y2);
-        grad.addColorStop(0,"rgba(255,210,238,.20)");
-        grad.addColorStop(.25,"rgba(219,101,203,.08)");
-        grad.addColorStop(1,"rgba(110,30,130,0)");
-
-        ctx.globalAlpha=.22;
-        ctx.strokeStyle=grad;
-        ctx.lineWidth=.42;
-        ctx.beginPath();
-        ctx.moveTo(L.x,fy);
-        ctx.lineTo(x2,y2);
-        ctx.stroke();
-    }
-
-    const rings=W<700?17:24;
-
-    for(let ri=1;ri<=rings;ri++){
-        const q=ri/rings;
-        const base=maxR*Math.pow(q,1.45);
-        ctx.beginPath();
-
-        for(let j=0;j<=180;j++){
-            const a=j/180*TAU;
-            const wave=
+            const petal=
                 1+
-                (.115*(1-q)+.015)*
-                Math.sin(a*8-t*.72+ri*.45)+
-                .014*Math.sin(a*19+t*.31+ri);
+                (
+                    .16*
+                    (1-q)+
+                    .025
+                )*
+                Math.sin(
+                    a*12+
+                    ri*.47
+                );
 
-            const twist=.11*Math.sin(t*.24+q*4);
-            const aa=a+twist*(1-q);
+            const fine=
+                1+
+                .014*
+                Math.sin(
+                    a*29+
+                    ri
+                );
 
-            const r=base*wave*(1+beat*.012*(1-q));
+            const r=
+                base*
+                petal*
+                fine;
 
-            const x=L.x+Math.cos(aa)*r;
-            const y=fy+Math.sin(aa)*r*sy;
+            points.push(
 
-            if(j===0)ctx.moveTo(x,y);
-            else ctx.lineTo(x,y);
+                new THREE.Vector3(
+
+                    Math.cos(a)*r,
+
+                    FLOOR_Y,
+
+                    Math.sin(a)*r
+                )
+            );
         }
 
-        ctx.globalAlpha=.065+.23*(1-q);
-        ctx.strokeStyle=ri<5?"#ffe5f5":"#cb6fc9";
-        ctx.lineWidth=ri<5?.82:.45;
-        ctx.stroke();
+        const geometry=
+            new THREE.BufferGeometry()
+            .setFromPoints(
+                points
+            );
+
+        group.add(
+
+            new THREE.LineLoop(
+
+                geometry,
+
+                ri<6
+                    ?materialNear
+                    :materialFar
+            )
+        );
     }
 
-    for(const d of floorDust){
-        const r=d.r*maxR;
-        const a=d.a+t*.018*(1-d.r);
-        const x=L.x+Math.cos(a)*r;
-        const y=fy+Math.sin(a)*r*sy;
+    /*
+     * 放射线
+     */
 
-        ctx.globalAlpha=d.alpha*(1-d.r*.72);
-        ctx.fillStyle="#efacd9";
-        ctx.fillRect(x,y,d.size,d.size);
+    const spokes=[];
+
+    const spokeCount=
+        MOBILE
+            ?38
+            :58;
+
+    for(
+        let i=0;
+        i<spokeCount;
+        i++
+    ){
+
+        const a=
+            i/
+            spokeCount*
+            Math.PI*2;
+
+        spokes.push(
+
+            0,
+            FLOOR_Y,
+            0,
+
+            Math.cos(a)*24,
+            FLOOR_Y,
+            Math.sin(a)*24
+        );
     }
 
-    for(let i=0;i<6;i++){
-        const scale=
-            1+
-            Math.sin(t*1.3-i*.55)*.04+
-            beat*.035;
+    const spokeGeo=
+        new THREE.BufferGeometry();
 
-        const rx=(8+i*10)*scale;
-        const ry=(1.8+i*1.85)*scale;
+    spokeGeo.setAttribute(
 
-        ctx.globalAlpha=.33-i*.042;
-        ctx.strokeStyle=i<2?"#fff8fc":"#ed83c9";
-        ctx.lineWidth=i<2?.95:.62;
+        "position",
 
-        ctx.beginPath();
-        ctx.ellipse(L.x,fy,rx,ry,0,0,TAU);
-        ctx.stroke();
+        new THREE.Float32BufferAttribute(
+            spokes,
+            3
+        )
+    );
+
+    group.add(
+
+        new THREE.LineSegments(
+
+            spokeGeo,
+
+            new THREE.LineBasicMaterial({
+
+                color:
+                    0x8e4a9b,
+
+                transparent:true,
+
+                opacity:.065,
+
+                depthWrite:false,
+
+                blending:
+                    THREE.AdditiveBlending
+            })
+        )
+    );
+
+    /*
+     * 地面点阵
+     */
+
+    const dots=
+        MOBILE
+            ?2200
+            :5200;
+
+    const dp=
+        new Float32Array(
+            dots*3
+        );
+
+    const dc=
+        new Float32Array(
+            dots*3
+        );
+
+    for(
+        let i=0;
+        i<dots;
+        i++
+    ){
+
+        const r=
+            Math.sqrt(
+                Math.random()
+            )*23;
+
+        const a=
+            Math.random()*
+            Math.PI*2;
+
+        dp[i*3]=
+            Math.cos(a)*r;
+
+        dp[i*3+1]=
+            FLOOR_Y+.01;
+
+        dp[i*3+2]=
+            Math.sin(a)*r;
+
+        const near=
+            1-r/23;
+
+        dc[i*3]=
+            .52+
+            .42*near;
+
+        dc[i*3+1]=
+            .24+
+            .42*near;
+
+        dc[i*3+2]=
+            .65+
+            .33*near;
     }
 
-    drawTipStream(t,tip.x,tip.y,fy,L.s);
+    const dotGeo=
+        new THREE.BufferGeometry();
 
-    ctx.restore();
-}
+    dotGeo.setAttribute(
 
-function drawTipStream(t,x,y1,y2,s){
-    const gap=y2-y1;
-    if(gap<=0)return;
+        "position",
 
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
+        new THREE.BufferAttribute(
+            dp,
+            3
+        )
+    );
 
-    for(const p of tipDust){
-        const q=norm(p.q+t*.10);
-        const mid=Math.sin(q*Math.PI);
+    dotGeo.setAttribute(
 
-        const yy=y1+gap*q;
-        const width=s*(.025+.16*mid);
+        "color",
 
-        const xx=
-            x+
-            Math.sin(
-                p.phase+t*2.15+q*14
-            )*width;
+        new THREE.BufferAttribute(
+            dc,
+            3
+        )
+    );
 
-        ctx.globalAlpha=p.alpha*mid;
+    group.add(
 
-        if(p.size<1.5){
-            ctx.fillStyle="#ffe4f4";
-            ctx.fillRect(xx,yy,p.size,p.size);
-        }else{
-            const z=p.size;
-            ctx.drawImage(glowWhite,xx-z/2,yy-z/2,z,z);
+        new THREE.Points(
+
+            dotGeo,
+
+            new THREE.PointsMaterial({
+
+                size:.045,
+
+                vertexColors:true,
+
+                transparent:true,
+
+                opacity:.45,
+
+                depthWrite:false,
+
+                blending:
+                    THREE.AdditiveBlending
+            })
+        )
+    );
+
+    /*
+     * 中央能量波纹
+     */
+
+    const center=
+        new THREE.Group();
+
+    center.position.y=
+        FLOOR_Y+.025;
+
+    for(
+        let i=0;
+        i<7;
+        i++
+    ){
+
+        const r=
+            .55+
+            i*.54;
+
+        const points=[];
+
+        for(
+            let j=0;
+            j<150;
+            j++
+        ){
+
+            const a=
+                j/
+                150*
+                Math.PI*2;
+
+            points.push(
+
+                new THREE.Vector3(
+
+                    Math.cos(a)*r,
+
+                    0,
+
+                    Math.sin(a)*r
+                )
+            );
         }
+
+        const geometry=
+            new THREE.BufferGeometry()
+            .setFromPoints(
+                points
+            );
+
+        center.add(
+
+            new THREE.LineLoop(
+
+                geometry,
+
+                new THREE.LineBasicMaterial({
+
+                    color:
+                        i<2
+                            ?0xffe5f5
+                            :0xdd72c2,
+
+                    transparent:true,
+
+                    opacity:
+                        .33-
+                        i*.035,
+
+                    depthWrite:false,
+
+                    blending:
+                        THREE.AdditiveBlending
+                })
+            )
+        );
     }
 
-    ctx.globalAlpha=.20;
-    ctx.drawImage(
-        glowWhite,
-        x-s*.45,
-        y2-s*.45,
-        s*.9,
-        s*.9
+    group.add(center);
+
+    return {
+        group,
+        center
+    };
+}
+
+const floor=
+    createFloor();
+
+/* ============================================================
+   BACKGROUND STARS
+============================================================ */
+
+function createStars(){
+
+    const position=
+        new Float32Array(
+            STAR_COUNT*3
+        );
+
+    const color=
+        new Float32Array(
+            STAR_COUNT*3
+        );
+
+    for(
+        let i=0;
+        i<STAR_COUNT;
+        i++
+    ){
+
+        position[i*3]=
+            (
+                Math.random()-.5
+            )*90;
+
+        position[i*3+1]=
+            (
+                Math.random()-.5
+            )*58+2;
+
+        position[i*3+2]=
+            -10-
+            Math.random()*45;
+
+        const b=
+            .22+
+            Math.random()*.42;
+
+        color[i*3]=b;
+
+        color[i*3+1]=
+            b*.48;
+
+        color[i*3+2]=
+            b*.84;
+    }
+
+    const geometry=
+        new THREE.BufferGeometry();
+
+    geometry.setAttribute(
+
+        "position",
+
+        new THREE.BufferAttribute(
+            position,
+            3
+        )
     );
 
-    ctx.restore();
-}
+    geometry.setAttribute(
 
-function vignette(){
-    ctx.save();
-    ctx.globalCompositeOperation="source-over";
+        "color",
 
-    const g=ctx.createRadialGradient(
-        W*.5,H*.43,
-        Math.min(W,H)*.22,
-        W*.5,H*.43,
-        Math.max(W,H)*.72
+        new THREE.BufferAttribute(
+            color,
+            3
+        )
     );
 
-    g.addColorStop(0,"rgba(0,0,0,0)");
-    g.addColorStop(.63,"rgba(0,0,0,.02)");
-    g.addColorStop(1,"rgba(0,0,0,.60)");
+    const stars=
+        new THREE.Points(
 
-    ctx.fillStyle=g;
-    ctx.fillRect(0,0,W,H);
+            geometry,
 
-    ctx.restore();
+            new THREE.PointsMaterial({
+
+                size:.07,
+
+                vertexColors:true,
+
+                transparent:true,
+
+                opacity:.60,
+
+                depthWrite:false,
+
+                blending:
+                    THREE.AdditiveBlending
+            })
+        );
+
+    scene.add(stars);
+
+    return stars;
 }
 
-function animate(now){
-    requestAnimationFrame(animate);
+const stars=
+    createStars();
 
-    const dt=Math.min((now-last)/1000,.033);
-    last=now;
-    const t=now*.001;
+/* ============================================================
+   POINTER
+============================================================ */
 
-    mx+=(tmx-mx)*.025;
-    my+=(tmy-my)*.025;
+const pointer={
+    x:0,
+    y:0,
+    tx:0,
+    ty:0
+};
 
-    const L=layout();
-    const B=beatInfo(t);
+addEventListener(
+    "pointermove",
+    e=>{
 
-    background(t,L);
-    drawMist(L,t);
-    drawFloor(t,L,B.pulse,B.b);
-    drawInner(t,L,B.pulse);
-    drawFlow(t,dt,L,B.pulse);
-    drawRibbons(t,L,B.pulse);
-    updateComets(t,dt,L,B.pulse,B.b);
+        pointer.tx=
+            (
+                e.clientX/
+                innerWidth-
+                .5
+            )*2;
 
-    const high=B.b>.72;
-    if(high&&!beatWasHigh)spawnBeatBurst(t,L,B.pulse);
-    beatWasHigh=high;
+        pointer.ty=
+            (
+                e.clientY/
+                innerHeight-
+                .5
+            )*2;
 
-    updateSparks(t,dt,L);
-    vignette();
+    },
+    {
+        passive:true
+    }
+);
 
-    first=false;
+addEventListener(
+    "pointerleave",
+    ()=>{
+
+        pointer.tx=0;
+        pointer.ty=0;
+
+    },
+    {
+        passive:true
+    }
+);
+
+/* ============================================================
+   RESIZE
+============================================================ */
+
+addEventListener(
+    "resize",
+    ()=>{
+
+        const mobile=
+            innerWidth<720;
+
+        camera.aspect=
+            innerWidth/
+            innerHeight;
+
+        camera.fov=
+            mobile
+                ?57
+                :48;
+
+        camera.position.z=
+            mobile
+                ?43
+                :38.5;
+
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(
+            innerWidth,
+            innerHeight
+        );
+
+        composer.setSize(
+            innerWidth,
+            innerHeight
+        );
+    }
+);
+
+/* ============================================================
+   ANIMATION
+============================================================ */
+
+const clock=
+    new THREE.Clock();
+
+function animate(){
+
+    requestAnimationFrame(
+        animate
+    );
+
+    const t=
+        clock.getElapsedTime();
+
+    const phase=
+        t%LOOP;
+
+    /*
+     * Heart
+     */
+
+    heartMat
+    .uniforms
+    .uTime
+    .value=t;
+
+    auraMat
+    .uniforms
+    .uTime
+    .value=t;
+
+    /*
+     * Burst
+     */
+
+    for(
+        const material of
+        burstMats
+    ){
+
+        material
+        .uniforms
+        .uTime
+        .value=t;
+    }
+
+    /*
+     * Orbit
+     */
+
+    for(
+        const ring of
+        orbit.rings
+    ){
+
+        ring
+        .material
+        .uniforms
+        .uTime
+        .value=t;
+
+        ring.rotation.y=
+            t*
+            ring.userData.speed+
+            ring.userData.phase;
+    }
+
+    /*
+     * Pointer parallax
+     */
+
+    pointer.x+=
+        (
+            pointer.tx-
+            pointer.x
+        )*.025;
+
+    pointer.y+=
+        (
+            pointer.ty-
+            pointer.y
+        )*.025;
+
+    camera.position.x+=
+        (
+            pointer.x*.34-
+            camera.position.x
+        )*.025;
+
+    camera.position.y+=
+        (
+            (
+                MOBILE
+                    ?4.2
+                    :4.6
+            )
+            -
+            pointer.y*.18
+            -
+            camera.position.y
+        )*.025;
+
+    camera.lookAt(
+        0,
+        .5,
+        0
+    );
+
+    heartGroup.rotation.x=
+        pointer.y*.015;
+
+    heartGroup.rotation.z=
+        Math.sin(
+            t*.22
+        )*.004;
+
+    /*
+     * Orbit animation
+     */
+
+    const orbitVisible=
+        THREE.MathUtils.smoothstep(
+            phase,
+            3.55,
+            4.55
+        )*
+        (
+            1-
+            THREE.MathUtils.smoothstep(
+                phase,
+                8.25,
+                9.10
+            )
+        );
+
+    orbit.group.scale.setScalar(
+        .98+
+        .025*
+        Math.sin(
+            t*1.5
+        )
+    );
+
+    orbit.group.position.x=
+        Math.sin(
+            t*.38
+        )*
+        .04*
+        orbitVisible;
+
+    /*
+     * Ground
+     */
+
+    floor.group.rotation.y=
+        t*.026;
+
+    floor.center.rotation.y=
+        -t*.20;
+
+    floor.center.scale.setScalar(
+        1+
+        .025*
+        Math.sin(
+            t*1.4
+        )
+    );
+
+    /*
+     * Stars
+     */
+
+    stars.rotation.z=
+        t*.0011;
+
+    composer.render();
 }
 
-addEventListener("pointermove",e=>{
-    tmx=(e.clientX/W-.5)*2;
-    tmy=(e.clientY/H-.5)*2;
-},{passive:true});
+animate();
 
-addEventListener("pointerleave",()=>{
-    tmx=0;tmy=0;
-},{passive:true});
-
-let timer;
-addEventListener("resize",()=>{
-    clearTimeout(timer);
-    timer=setTimeout(resize,120);
-},{passive:true});
-
-buildCurve();
-makeSprites();
-resize();
-requestAnimationFrame(animate);
-})();
 </script>
 </body>
 </html>
