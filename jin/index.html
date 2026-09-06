@@ -1,3 +1,4 @@
+```html
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -8,53 +9,31 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;overflow:hidden;background:#03060d}
-body{overscroll-behavior:none}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
 </style>
 </head>
 <body>
-<canvas id="love" aria-hidden="true"></canvas>
-
+<canvas id="love"></canvas>
 <script>
 (()=>{
 "use strict";
 
 const canvas=document.getElementById("love");
 const ctx=canvas.getContext("2d",{alpha:false});
-
 const TAU=Math.PI*2;
 const LUT_SIZE=2048;
+const RIBBON_SAMPLES=460;
 
-let W=0;
-let H=0;
-let DPR=1;
-let centerX=0;
-let floorY=0;
-let heartUnit=1;
-let floorRadius=1;
-
-let bgGradient=null;
-let vignetteGradient=null;
-let glowPink=null;
-let glowWhite=null;
+let W=0,H=0,DPR=1;
+let centerX=0,floorY=0,heartUnit=1,floorRadius=1;
+let bgGradient,vignetteGradient,glowPink,glowWhite;
 let lastProfile="";
 let animationTime=0;
 let lastFrameTime=performance.now();
 
-let core=[];
-let shell=[];
-let inside=[];
-let lower=[];
-let dust=[];
-let flowerOuter=[];
-let flowerEdge=[];
-let flowerInner=[];
-let flowerFlow=[];
-let flowerCore=[];
-let rays=[];
-let debris=[];
-let stars=[];
-let stem=[];
+let core=[],shell=[],inside=[],lower=[],dust=[];
+let flowerOuter=[],flowerEdge=[],flowerInner=[],flowerFlow=[],flowerCore=[];
+let rays=[],debris=[],stars=[],stem=[];
 
 const curveX=new Float32Array(LUT_SIZE);
 const curveY=new Float32Array(LUT_SIZE);
@@ -66,6 +45,24 @@ const projected={x:0,y:0,k:1,z:0};
 const floorProjected={x:0,y:0,z:0};
 const orbitSample={x:0,y:0,z:0};
 const flowerSample={x:0,z:0,lift:0,u:0};
+
+const ribbonX=[
+    new Float32Array(RIBBON_SAMPLES),
+    new Float32Array(RIBBON_SAMPLES),
+    new Float32Array(RIBBON_SAMPLES)
+];
+
+const ribbonY=[
+    new Float32Array(RIBBON_SAMPLES),
+    new Float32Array(RIBBON_SAMPLES),
+    new Float32Array(RIBBON_SAMPLES)
+];
+
+const ribbonZ=[
+    new Float32Array(RIBBON_SAMPLES),
+    new Float32Array(RIBBON_SAMPLES),
+    new Float32Array(RIBBON_SAMPLES)
+];
 
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const mix=(a,b,t)=>a+(b-a)*t;
@@ -81,12 +78,32 @@ const smoother=v=>{
     return v*v*v*(v*(v*6-15)+10);
 };
 
+function turnProgress(time,duration,ramp){
+    time=clamp(time,0,duration);
+    ramp=Math.min(ramp,duration*.48);
+
+    const distance=duration-ramp;
+
+    if(time<ramp){
+        return time*time/(2*ramp*distance);
+    }
+
+    if(time<duration-ramp){
+        return(time-ramp*.5)/distance;
+    }
+
+    const remain=duration-time;
+    return 1-remain*remain/(2*ramp*distance);
+}
+
 function mulberry32(seed){
     return function(){
         seed|=0;
         seed=seed+0x6D2B79F5|0;
+
         let t=Math.imul(seed^seed>>>15,1|seed);
         t=t+Math.imul(t^t>>>7,61|t)^t;
+
         return((t^t>>>14)>>>0)/4294967296;
     };
 }
@@ -103,9 +120,9 @@ const rnd=(a=1,b)=>{
 
 const gaussian=()=>random()+random()+random()+random()-2;
 
-/* 标准心形参数曲线 */
 function heartPoint(t){
     const s=Math.sin(t);
+
     const rawY=
         13*Math.cos(t)
         -5*Math.cos(2*t)
@@ -157,8 +174,8 @@ function makeGlow(size,inner,mid){
 
     const g=c.getContext("2d");
     const r=size/2;
-    const gradient=g.createRadialGradient(r,r,0,r,r,r);
 
+    const gradient=g.createRadialGradient(r,r,0,r,r,r);
     gradient.addColorStop(0,"rgba(255,255,255,1)");
     gradient.addColorStop(.10,inner);
     gradient.addColorStop(.34,mid);
@@ -192,10 +209,10 @@ function buildHeart(profile){
 
     const mobile=profile==="mobile";
     const count={
-        core:mobile?940:1650,
-        shell:mobile?2850:5100,
-        inside:mobile?2350:4050,
-        lower:mobile?680:1180,
+        core:mobile?1100:1900,
+        shell:mobile?3200:5600,
+        inside:mobile?2600:4550,
+        lower:mobile?760:1320,
         dust:mobile?520:920
     };
 
@@ -209,21 +226,28 @@ function buildHeart(profile){
         const u=(i+rnd(-.38,.38))/count.core;
         const ring=rnd(.004,.034);
         const a=rnd(TAU);
+        const depth=rnd(-.405,.405);
+        const depthRatio=Math.abs(depth)/.405;
 
-        core.push(pointBase(
+        const p=pointBase(
             u,
             Math.cos(a)*ring+gaussian()*.006,
-            Math.sin(a)*ring*1.85+gaussian()*.014,
+            depth+Math.sin(a)*ring*.52+gaussian()*.012,
             rnd(1,2.55),
             rnd(.68,1),
             random()<.24,
             rnd(.0028,.0058)
-        ));
+        );
+
+        p.shapeScale=1-.13*Math.pow(depthRatio,1.75);
+        core.push(p);
     }
 
     for(let i=0;i<count.shell;i++){
         const tube=Math.abs(gaussian())*rnd(.045,.135);
         const a=rnd(TAU);
+        const depth=rnd(-.46,.46);
+        const depthRatio=Math.abs(depth)/.46;
 
         let offset=Math.cos(a)*tube+gaussian()*.022;
 
@@ -233,15 +257,18 @@ function buildHeart(profile){
                 Math.pow(random(),1.7);
         }
 
-        shell.push(pointBase(
+        const p=pointBase(
             random(),
             offset,
-            Math.sin(a)*tube*1.9+gaussian()*.058,
+            depth+Math.sin(a)*tube*.62+gaussian()*.025,
             random()<.11?rnd(2.8,4.25):rnd(.88,2.72),
             rnd(.38,.88),
             random()<.13,
             rnd(.004,.009)
-        ));
+        );
+
+        p.shapeScale=1-.15*Math.pow(depthRatio,1.72);
+        shell.push(p);
     }
 
     const fillBands=[.25,.39,.53,.66,.78,.88];
@@ -251,19 +278,28 @@ function buildHeart(profile){
 
         if(random()<.64){
             const band=fillBands[(random()*fillBands.length)|0];
-            radius=clamp(
-                band+gaussian()*.030,
-                .06,
-                .94
-            );
+            radius=clamp(band+gaussian()*.030,.06,.94);
         }else{
             radius=.045+.90*Math.sqrt(random());
         }
 
+        const depthLimit=
+            .045+
+            .46*Math.pow(
+                Math.max(0,1-radius*radius),
+                .56
+            );
+
+        const onSurface=random()<.34;
+
+        const depth=onSurface
+            ?(random()<.5?-1:1)*depthLimit*rnd(.72,1)
+            :rnd(-depthLimit,depthLimit);
+
         const p=pointBase(
             random(),
             gaussian()*.018,
-            gaussian()*(.065+.145*(1-radius)),
+            depth+gaussian()*.016,
             random()<.075?rnd(2.2,3.25):rnd(.70,2.02),
             rnd(.26,.66),
             random()<.105,
@@ -277,15 +313,25 @@ function buildHeart(profile){
         inside.push(p);
     }
 
-    /* 下半部额外粒子，使轮廓保持标准曲线但视觉更饱满 */
     for(let i=0;i<count.lower;i++){
         const bell=(random()+random()+random())/3;
         const radius=.18+.80*Math.pow(random(),.54);
 
+        const depthLimit=
+            .035+
+            .43*Math.pow(
+                Math.max(0,1-radius*radius),
+                .58
+            );
+
+        const depth=random()<.30
+            ?(random()<.5?-1:1)*depthLimit*rnd(.74,1)
+            :rnd(-depthLimit,depthLimit);
+
         const p=pointBase(
             .285+.43*bell,
             gaussian()*.014,
-            gaussian()*(.075+.155*(1-radius)),
+            depth+gaussian()*.016,
             random()<.09?rnd(2.2,3.35):rnd(.72,2.10),
             rnd(.34,.73),
             random()<.12,
@@ -301,17 +347,25 @@ function buildHeart(profile){
 
     for(let i=0;i<count.dust;i++){
         const side=Math.sign(gaussian()||1);
+        const depth=rnd(-.58,.58);
 
         const p=pointBase(
             random(),
             gaussian()*.12+
                 side*rnd(.055,.23)*Math.pow(random(),.72),
-            gaussian()*.19,
+            depth+gaussian()*.055,
             rnd(.55,1.85),
             rnd(.12,.44),
             random()<.06,
             rnd(.006,.013)
         );
+
+        p.shapeScale=
+            1-
+            .12*Math.pow(
+                Math.min(1,Math.abs(depth)/.58),
+                1.5
+            );
 
         p.wobble=rnd(.008,.035);
         dust.push(p);
@@ -439,12 +493,9 @@ function buildEffects(profile){
     for(let i=0;i<rayCount;i++){
         rays.push({
             angle:i/rayCount*TAU+rnd(-.045,.045),
-            length:rnd(.78,2.25)*
-                Math.pow(rnd(.35,1),.34),
+            length:rnd(.78,2.25)*Math.pow(rnd(.35,1),.34),
             start:rnd(.04,.30),
-            width:random()<.14
-                ?rnd(1.2,2.2)
-                :rnd(.35,1.05),
+            width:random()<.14?rnd(1.2,2.2):rnd(.35,1.05),
             alpha:rnd(.22,.86),
             delay:rnd(0,.22),
             phase:rnd(TAU)
@@ -456,14 +507,11 @@ function buildEffects(profile){
     for(let i=0;i<debrisCount;i++){
         debris.push({
             angle:rnd(TAU),
-            speed:rnd(.45,1.75)*
-                Math.pow(rnd(.2,1),.35),
+            speed:rnd(.45,1.75)*Math.pow(rnd(.2,1),.35),
             start:rnd(.05,.46),
             delay:rnd(0,.22),
             curve:rnd(-.25,.25),
-            size:random()<.08
-                ?rnd(1.8,3.1)
-                :rnd(.5,1.55),
+            size:random()<.08?rnd(1.8,3.1):rnd(.5,1.55),
             alpha:rnd(.18,.72),
             phase:rnd(TAU),
             hot:random()<.08
@@ -493,9 +541,7 @@ function buildStars(profile){
         stars.push({
             x:rnd(.05,.95),
             y:rnd(.10,.78),
-            size:random()<.05
-                ?rnd(1.5,2.4)
-                :rnd(.35,1.15),
+            size:random()<.05?rnd(1.5,2.4):rnd(.35,1.15),
             alpha:rnd(.035,.22),
             phase:rnd(TAU),
             speed:rnd(.35,1.25)
@@ -538,11 +584,8 @@ function resize(){
     );
 
     bgGradient=ctx.createRadialGradient(
-        centerX,
-        H*.44,
-        0,
-        centerX,
-        H*.44,
+        centerX,H*.44,0,
+        centerX,H*.44,
         Math.max(W,H)*.72
     );
 
@@ -552,12 +595,8 @@ function resize(){
     bgGradient.addColorStop(1,"#02040b");
 
     vignetteGradient=ctx.createRadialGradient(
-        centerX,
-        H*.48,
-        Math.min(W,H)*.15,
-        centerX,
-        H*.48,
-        Math.max(W,H)*.70
+        centerX,H*.48,Math.min(W,H)*.15,
+        centerX,H*.48,Math.max(W,H)*.70
     );
 
     vignetteGradient.addColorStop(0,"rgba(0,0,0,0)");
@@ -580,38 +619,32 @@ function sceneState(seconds){
     let zoom=1;
 
     if(t>=5.55&&t<6.35){
-        zoom=mix(
-            1,
-            .66,
-            smoother((t-5.55)/.80)
-        );
+        zoom=mix(1,.66,smoother((t-5.55)/.80));
     }else if(t>=6.35&&t<7.65){
         zoom=.66;
     }else if(t>=7.65&&t<8.72){
-        zoom=mix(
-            .66,
-            1,
-            smoother((t-7.65)/1.07)
-        );
+        zoom=mix(.66,1,smoother((t-7.65)/1.07));
     }
 
     let rotation;
 
     if(t<2.80){
-        rotation=TAU*smoother(t/2.80);
+        rotation=TAU*turnProgress(t,2.80,.38);
     }else if(t<6.55){
         rotation=TAU;
     }else{
         rotation=
             TAU+
-            TAU*smoother((t-6.55)/3.45);
+            TAU*turnProgress(t-6.55,3.45,.42);
     }
 
     const pitch=
-        .026*Math.sin(seconds*.43)+
-        .010*Math.sin(seconds*.91);
+        .032*Math.sin(rotation*.5)+
+        .012*Math.sin(seconds*.53);
 
-    const roll=.012*Math.sin(seconds*.27);
+    const roll=
+        .014*Math.sin(seconds*.31)+
+        .008*Math.sin(rotation);
 
     let ring=0;
 
@@ -671,14 +704,8 @@ function projectHeart(x,y,z,state,centerY){
     const yf=xr*sr+yr*cr;
     const k=1/(1-zr*.17);
 
-    projected.x=
-        centerX+
-        xf*heartUnit*state.zoom*k;
-
-    projected.y=
-        centerY-
-        yf*heartUnit*1.045*state.zoom*k;
-
+    projected.x=centerX+xf*heartUnit*state.zoom*k;
+    projected.y=centerY-yf*heartUnit*1.045*state.zoom*k;
     projected.k=k;
     projected.z=zr;
 
@@ -693,14 +720,8 @@ function projectOrbit(x,y,z,state,centerY){
     const yf=x*sr+y*cr;
     const k=1/(1-z*.17);
 
-    projected.x=
-        centerX+
-        xf*heartUnit*state.zoom*k;
-
-    projected.y=
-        centerY-
-        yf*heartUnit*1.045*state.zoom*k;
-
+    projected.x=centerX+xf*heartUnit*state.zoom*k;
+    projected.y=centerY-yf*heartUnit*1.045*state.zoom*k;
     projected.k=k;
     projected.z=z;
 
@@ -715,9 +736,7 @@ function projectFloor(x,z,zoom,angle,lift=0){
     const zr=x*s+z*c;
     const k=1/(1-zr*.27);
 
-    floorProjected.x=
-        centerX+
-        xr*floorRadius*zoom*k;
+    floorProjected.x=centerX+xr*floorRadius*zoom*k;
 
     floorProjected.y=
         floorY+
@@ -725,7 +744,6 @@ function projectFloor(x,z,zoom,angle,lift=0){
         lift*floorRadius*.18*zoom*k;
 
     floorProjected.z=zr;
-
     return floorProjected;
 }
 
@@ -742,9 +760,7 @@ function drawBackground(seconds){
 
         const flicker=
             .55+
-            .45*Math.sin(
-                seconds*p.speed+p.phase
-            );
+            .45*Math.sin(seconds*p.speed+p.phase);
 
         ctx.globalAlpha=
             p.alpha*
@@ -802,15 +818,8 @@ function drawAtmosphere(state,seconds,centerY){
         `rgba(255,139,198,${.050+state.burst*.08})`
     );
 
-    g.addColorStop(
-        .54,
-        "rgba(191,119,255,.024)"
-    );
-
-    g.addColorStop(
-        1,
-        "rgba(114,74,214,0)"
-    );
+    g.addColorStop(.54,"rgba(191,119,255,.024)");
+    g.addColorStop(1,"rgba(114,74,214,0)");
 
     ctx.fillStyle=g;
     ctx.beginPath();
@@ -818,6 +827,7 @@ function drawAtmosphere(state,seconds,centerY){
     ctx.fill();
 
     ctx.rotate(seconds*.035);
+
     ctx.globalAlpha=
         state.burst*.055+
         state.flash*.075;
@@ -828,14 +838,8 @@ function drawAtmosphere(state,seconds,centerY){
         ctx.rotate(TAU/12);
         ctx.beginPath();
         ctx.moveTo(heartUnit*.30,-1);
-        ctx.lineTo(
-            heartUnit*1.65,
-            -heartUnit*.018
-        );
-        ctx.lineTo(
-            heartUnit*1.65,
-            heartUnit*.018
-        );
+        ctx.lineTo(heartUnit*1.65,-heartUnit*.018);
+        ctx.lineTo(heartUnit*1.65,heartUnit*.018);
         ctx.closePath();
         ctx.fill();
     }
@@ -844,10 +848,7 @@ function drawAtmosphere(state,seconds,centerY){
 }
 
 function drawLensFlare(state,centerY){
-    const power=
-        state.flash+
-        state.burst*.24;
-
+    const power=state.flash+state.burst*.24;
     if(power<.002)return;
 
     const radius=
@@ -860,10 +861,7 @@ function drawLensFlare(state,centerY){
     ctx.translate(centerX,centerY);
     ctx.globalAlpha=power;
 
-    let g=ctx.createLinearGradient(
-        -radius,0,
-        radius,0
-    );
+    let g=ctx.createLinearGradient(-radius,0,radius,0);
 
     g.addColorStop(0,"rgba(255,128,194,0)");
     g.addColorStop(.32,"rgba(255,145,204,.035)");
@@ -873,12 +871,7 @@ function drawLensFlare(state,centerY){
     g.addColorStop(1,"rgba(255,128,194,0)");
 
     ctx.fillStyle=g;
-    ctx.fillRect(
-        -radius,
-        -1.25,
-        radius*2,
-        2.5
-    );
+    ctx.fillRect(-radius,-1.25,radius*2,2.5);
 
     g=ctx.createLinearGradient(
         0,-radius*.72,
@@ -891,32 +884,15 @@ function drawLensFlare(state,centerY){
     g.addColorStop(1,"rgba(255,150,211,0)");
 
     ctx.fillStyle=g;
-    ctx.fillRect(
-        -.75,
-        -radius*.72,
-        1.5,
-        radius*1.44
-    );
+    ctx.fillRect(-.75,-radius*.72,1.5,radius*1.44);
 
     ctx.rotate(Math.PI*.25);
     ctx.globalAlpha=power*.28;
     ctx.fillStyle="#ffe5f2";
-
-    ctx.fillRect(
-        -radius*.72,
-        -.38,
-        radius*1.44,
-        .76
-    );
+    ctx.fillRect(-radius*.72,-.38,radius*1.44,.76);
 
     ctx.rotate(Math.PI*.5);
-
-    ctx.fillRect(
-        -radius*.72,
-        -.38,
-        radius*1.44,
-        .76
-    );
+    ctx.fillRect(-radius*.72,-.38,radius*1.44,.76);
 
     ctx.restore();
 }
@@ -938,15 +914,8 @@ function drawFloorGlow(state){
         `rgba(255,215,237,${.23+state.burst*.20})`
     );
 
-    g.addColorStop(
-        .25,
-        "rgba(255,125,193,.11)"
-    );
-
-    g.addColorStop(
-        1,
-        "rgba(255,95,177,0)"
-    );
+    g.addColorStop(.25,"rgba(255,125,193,.11)");
+    g.addColorStop(1,"rgba(255,95,177,0)");
 
     ctx.fillStyle=g;
     ctx.beginPath();
@@ -962,8 +931,7 @@ function flowerPosition(p,seconds,inner=false,flowing=false){
         ?fract(p.u+seconds*p.speed)
         :p.u;
 
-    const rotation=
-        seconds*(inner?-.018:.014);
+    const rotation=seconds*(inner?-.018:.014);
 
     const baseAngle=
         p.petal/petals*TAU+
@@ -971,22 +939,13 @@ function flowerPosition(p,seconds,inner=false,flowing=false){
 
     const sway=
         .012*
-        Math.sin(
-            seconds*.62+
-            p.petal*.57
-        );
+        Math.sin(seconds*.62+p.petal*.57);
 
     const curl=
         (p.petal%2?1:-1)*
         (inner?.018:.028)*
         Math.sin(Math.PI*u)*
-        (
-            .80+
-            .20*Math.sin(
-                seconds*.42+
-                p.petal
-            )
-        );
+        (.80+.20*Math.sin(seconds*.42+p.petal));
 
     const angle=
         baseAngle+
@@ -996,10 +955,7 @@ function flowerPosition(p,seconds,inner=false,flowing=false){
 
     const opening=
         1+
-        .026*Math.sin(
-            seconds*.48+
-            p.petal*.39
-        );
+        .026*Math.sin(seconds*.48+p.petal*.39);
 
     const maximum=
         inner
@@ -1021,10 +977,7 @@ function flowerPosition(p,seconds,inner=false,flowing=false){
         ripple;
 
     const envelope=Math.pow(
-        Math.max(
-            0,
-            Math.sin(Math.PI*u)
-        ),
+        Math.max(0,Math.sin(Math.PI*u)),
         .84
     );
 
@@ -1036,13 +989,7 @@ function flowerPosition(p,seconds,inner=false,flowing=false){
     const lateral=
         p.lateral*
         width*
-        (
-            1+
-            .045*Math.sin(
-                seconds*.68+
-                p.phase
-            )
-        );
+        (1+.045*Math.sin(seconds*.68+p.phase));
 
     const ca=Math.cos(angle);
     const sa=Math.sin(angle);
@@ -1050,13 +997,7 @@ function flowerPosition(p,seconds,inner=false,flowing=false){
     const lift=
         envelope*
         (inner?.034:.026)*
-        (
-            .58+
-            .42*Math.sin(
-                seconds*.55+
-                p.petal*.31
-            )
-        );
+        (.58+.42*Math.sin(seconds*.55+p.petal*.31));
 
     flowerSample.x=ca*radius-sa*lateral;
     flowerSample.z=sa*radius+ca*lateral;
@@ -1078,6 +1019,7 @@ function drawFlowerLayer(
 
     for(let i=0;i<list.length;i++){
         const item=list[i];
+
         const f=flowerPosition(
             item,
             seconds,
@@ -1085,9 +1027,7 @@ function drawFlowerLayer(
             false
         );
 
-        const expansion=
-            1+
-            state.burst*.035;
+        const expansion=1+state.burst*.035;
 
         const p=projectFloor(
             f.x*expansion,
@@ -1102,8 +1042,7 @@ function drawFlowerLayer(
             .32*Math.pow(
                 .5+
                 .5*Math.sin(
-                    seconds*
-                    (1.1+item.size*.16)+
+                    seconds*(1.1+item.size*.16)+
                     item.phase
                 ),
                 2
@@ -1125,11 +1064,7 @@ function drawFlowerLayer(
 
         const size=
             item.size*
-            clamp(
-                1+p.z*.10,
-                .80,
-                1.20
-            );
+            clamp(1+p.z*.10,.80,1.20);
 
         ctx.globalAlpha=alpha;
 
@@ -1147,10 +1082,7 @@ function drawFlowerLayer(
                     4.5+
                     2.2*Math.pow(
                         .5+
-                        .5*Math.sin(
-                            seconds*2.1+
-                            item.phase
-                        ),
+                        .5*Math.sin(seconds*2.1+item.phase),
                         3
                     )
                 );
@@ -1181,9 +1113,7 @@ function drawFlowerFlow(state,seconds){
             true
         );
 
-        const expansion=
-            1+
-            state.burst*.055;
+        const expansion=1+state.burst*.055;
 
         const p=projectFloor(
             f.x*expansion,
@@ -1200,10 +1130,7 @@ function drawFlowerFlow(state,seconds){
 
         const sparkle=
             .72+
-            .28*Math.sin(
-                seconds*3.1+
-                item.phase
-            );
+            .28*Math.sin(seconds*3.1+item.phase);
 
         const alpha=clamp(
             item.alpha*
@@ -1260,14 +1187,9 @@ function drawFlowerCore(state,seconds){
                 item.radius*15
             );
 
-        const radius=
-            item.radius*pulse;
-
-        const x=
-            Math.cos(angle)*radius;
-
-        const z=
-            Math.sin(angle)*radius;
+        const radius=item.radius*pulse;
+        const x=Math.cos(angle)*radius;
+        const z=Math.sin(angle)*radius;
 
         const lift=
             .008+
@@ -1280,13 +1202,7 @@ function drawFlowerCore(state,seconds){
                 2
             );
 
-        const p=projectFloor(
-            x,
-            z,
-            1,
-            0,
-            lift
-        );
+        const p=projectFloor(x,z,1,0,lift);
 
         const twinkle=
             .62+
@@ -1409,10 +1325,7 @@ function drawStem(state,seconds){
         const x=
             centerX+
             p.sway*width+
-            Math.sin(
-                seconds*2+
-                p.phase*TAU
-            )*
+            Math.sin(seconds*2+p.phase*TAU)*
             width*.13;
 
         const fade=Math.sin(life*Math.PI);
@@ -1431,11 +1344,8 @@ function drawStem(state,seconds){
     }
 
     const g=ctx.createRadialGradient(
-        centerX,
-        floorY,
-        0,
-        centerX,
-        floorY,
+        centerX,floorY,0,
+        centerX,floorY,
         heartUnit*.17*state.zoom
     );
 
@@ -1444,15 +1354,8 @@ function drawStem(state,seconds){
         `rgba(255,248,252,${.24+state.flash*.18})`
     );
 
-    g.addColorStop(
-        .18,
-        "rgba(255,180,218,.13)"
-    );
-
-    g.addColorStop(
-        1,
-        "rgba(255,110,184,0)"
-    );
+    g.addColorStop(.18,"rgba(255,180,218,.13)");
+    g.addColorStop(1,"rgba(255,110,184,0)");
 
     ctx.globalAlpha=1;
     ctx.fillStyle=g;
@@ -1473,12 +1376,7 @@ function drawStem(state,seconds){
 }
 
 function drawRays(state,centerY){
-    if(
-        state.burst<=.001&&
-        state.linger<=.001
-    ){
-        return;
-    }
+    if(state.burst<=.001&&state.linger<=.001)return;
 
     ctx.save();
     ctx.globalCompositeOperation="lighter";
@@ -1489,34 +1387,21 @@ function drawRays(state,centerY){
     for(let i=0;i<rays.length;i++){
         const ray=rays[i];
 
-        if(
-            state.burst<.012&&
-            i%6!==0
-        ){
-            continue;
-        }
+        if(state.burst<.012&&i%6!==0)continue;
 
         const q=clamp(
-            (
-                state.burstProgress-
-                ray.delay
-            )/
+            (state.burstProgress-ray.delay)/
             (1-ray.delay)
         );
 
         if(q<=0)continue;
 
-        const travel=
-            1-
-            Math.pow(1-q,2.7);
+        const travel=1-Math.pow(1-q,2.7);
 
         const head=
             heartUnit*
             state.zoom*
-            (
-                ray.start+
-                ray.length*travel
-            );
+            (ray.start+ray.length*travel);
 
         const tail=
             head-
@@ -1525,15 +1410,11 @@ function drawRays(state,centerY){
             (
                 .10+
                 .43*(1-q)+
-                ray.length*
-                (.13+state.linger*.18)
+                ray.length*(.13+state.linger*.18)
             );
 
         const bend=
-            Math.sin(
-                ray.phase+
-                q*3
-            )*
+            Math.sin(ray.phase+q*3)*
             heartUnit*.025;
 
         const ca=Math.cos(ray.angle);
@@ -1559,8 +1440,7 @@ function drawRays(state,centerY){
         ctx.globalAlpha=
             ray.alpha*
             (
-                state.burst*
-                (1-q*.48)+
+                state.burst*(1-q*.48)+
                 state.linger*.16
             );
 
@@ -1624,10 +1504,7 @@ function drawFlare(state,centerY,front=false){
         );
     }
 
-    g.addColorStop(
-        1,
-        "rgba(255,95,177,0)"
-    );
+    g.addColorStop(1,"rgba(255,95,177,0)");
 
     ctx.fillStyle=g;
     ctx.beginPath();
@@ -1636,168 +1513,82 @@ function drawFlare(state,centerY,front=false){
     ctx.restore();
 }
 
-function orbitPoint(
-    i,
-    n,
-    state,
-    seconds,
-    strand=0
-){
-    const progress=i/(n-1);
-
+function orbitPoint(progress,state,seconds,strand=0){
     const u=
         progress*
         TAU*
-        (3.12+strand*.025);
+        (3.08+strand*.018);
 
-    const phase=
-        u+
-        state.rotation*.72+
-        seconds*.105+
-        strand*.105;
+    const drift=
+        state.rotation*.57+
+        seconds*(.145+strand*.011)+
+        strand*.068;
+
+    const flutter=
+        .050*Math.sin(
+            seconds*.72+
+            u*.31+
+            strand*1.7
+        )+
+        .018*Math.sin(
+            seconds*1.31-
+            u*.63+
+            strand
+        );
+
+    const phase=u+drift+flutter;
 
     const radius=
-        1.115+
-        strand*.020+
-        .050*Math.sin(
-            u*2.35+
-            seconds*.48+
-            strand*.7
+        1.105+
+        (strand-1)*.022+
+        .054*Math.sin(
+            u*1.42+
+            seconds*.56+
+            strand*.83
+        )+
+        .019*Math.sin(
+            u*3.15-
+            seconds*.88+
+            strand*2.1
         );
-
-    const x=Math.cos(phase)*radius;
-    const z=Math.sin(phase)*radius;
 
     const y=
-        .88-
-        progress*1.76+
-        (strand-.5)*.018+
-        .047*Math.sin(
-            u*1.7+
-            seconds*.54+
-            strand*.72
+        .91-
+        progress*1.82+
+        (strand-1)*.014+
+        .052*Math.sin(
+            u*.68+
+            seconds*.64+
+            strand*.91
+        )+
+        .018*Math.sin(
+            u*2.25-
+            seconds*.72+
+            strand
         );
 
-    orbitSample.x=x;
+    orbitSample.x=Math.cos(phase)*radius;
     orbitSample.y=y;
-    orbitSample.z=z;
+    orbitSample.z=Math.sin(phase)*radius;
 
     return orbitSample;
 }
 
-function traceOrbit(
-    front,
-    state,
-    seconds,
-    centerY,
-    strand
-){
-    const n=420;
-    let drawing=false;
+function buildRibbonFrame(state,seconds,centerY){
+    for(let strand=0;strand<3;strand++){
+        const px=ribbonX[strand];
+        const py=ribbonY[strand];
+        const pz=ribbonZ[strand];
 
-    ctx.beginPath();
-
-    for(let i=0;i<n;i++){
-        const o=orbitPoint(
-            i,
-            n,
-            state,
-            seconds,
-            strand
-        );
-
-        const visible=
-            front
-                ?o.z>=-.02
-                :o.z<-.02;
-
-        const p=projectOrbit(
-            o.x,
-            o.y,
-            o.z,
-            state,
-            centerY
-        );
-
-        if(visible){
-            if(!drawing){
-                ctx.moveTo(p.x,p.y);
-            }else{
-                ctx.lineTo(p.x,p.y);
-            }
-
-            drawing=true;
-        }else{
-            drawing=false;
-        }
-    }
-}
-
-function drawOrbit(
-    front,
-    state,
-    seconds,
-    centerY
-){
-    if(state.ring<=.002)return;
-
-    ctx.save();
-    ctx.globalCompositeOperation="lighter";
-    ctx.lineCap="round";
-    ctx.lineJoin="round";
-
-    const depth=front?1:.31;
-
-    traceOrbit(
-        front,
-        state,
-        seconds,
-        centerY,
-        0
-    );
-
-    ctx.globalAlpha=
-        state.ring*
-        depth*.13;
-
-    ctx.strokeStyle="#ff69ad";
-    ctx.lineWidth=front?7.2:4.6;
-    ctx.shadowColor="#ff69ad";
-    ctx.shadowBlur=19;
-    ctx.stroke();
-
-    ctx.globalAlpha=
-        state.ring*
-        depth*
-        (front?.92:.58);
-
-    ctx.strokeStyle="#ffe2ee";
-    ctx.lineWidth=front?1.18:.70;
-    ctx.shadowColor="#ff69ad";
-    ctx.shadowBlur=7;
-    ctx.stroke();
-
-    if(front){
-        ctx.fillStyle="#fff4fa";
-        ctx.shadowBlur=0;
-
-        for(let i=0;i<84;i++){
-            const u=fract(
-                i/84+
-                seconds*.040
-            );
-
-            const index=Math.floor(u*419);
-
+        for(let i=0;i<RIBBON_SAMPLES;i++){
             const o=orbitPoint(
-                index,
-                420,
+                i/(RIBBON_SAMPLES-1),
                 state,
                 seconds,
-                0
+                strand
             );
 
-            if(o.z<0)continue;
+            const depth=o.z;
 
             const p=projectOrbit(
                 o.x,
@@ -1807,23 +1598,111 @@ function drawOrbit(
                 centerY
             );
 
-            const alpha=
-                .26+
-                .74*Math.pow(
-                    Math.sin(
-                        (u+i*.17)*Math.PI
-                    ),
-                    2
-                );
+            px[i]=p.x;
+            py[i]=p.y;
+            pz[i]=depth;
+        }
+    }
+}
 
-            ctx.globalAlpha=
+function traceOrbit(front,strand){
+    let drawing=false;
+
+    const px=ribbonX[strand];
+    const py=ribbonY[strand];
+    const pz=ribbonZ[strand];
+
+    ctx.beginPath();
+
+    for(let i=0;i<RIBBON_SAMPLES;i++){
+        const visible=
+            front
+                ?pz[i]>=-.025
+                :pz[i]<-.025;
+
+        if(visible){
+            if(!drawing){
+                ctx.moveTo(px[i],py[i]);
+            }else{
+                ctx.lineTo(px[i],py[i]);
+            }
+
+            drawing=true;
+        }else{
+            drawing=false;
+        }
+    }
+}
+
+function drawRibbonParticles(front,state,seconds,centerY){
+    const colors=[
+        "#fff7fb",
+        "#ffd7e9",
+        "#f6ddff"
+    ];
+
+    ctx.shadowBlur=0;
+
+    for(let strand=0;strand<3;strand++){
+        ctx.fillStyle=colors[strand];
+
+        const count=76;
+
+        for(let i=0;i<count;i++){
+            const progress=fract(
+                i/count+
+                seconds*(.048+strand*.005)+
+                strand*.137
+            );
+
+            const o=orbitPoint(
+                progress,
+                state,
+                seconds,
+                strand
+            );
+
+            const visible=
+                front
+                    ?o.z>=0
+                    :o.z<0;
+
+            if(!visible)continue;
+
+            const p=projectOrbit(
+                o.x,
+                o.y,
+                o.z,
+                state,
+                centerY
+            );
+
+            const wave=Math.pow(
+                .5+
+                .5*Math.sin(
+                    seconds*3.4+
+                    i*.81+
+                    strand*1.9
+                ),
+                3
+            );
+
+            const depth=front?1:.24;
+
+            const alpha=
                 state.ring*
-                alpha*.84;
+                depth*
+                (.24+.76*wave);
 
             const size=
-                i%19===0
-                    ?2.4
-                    :.92;
+                (
+                    i%23===0
+                        ?2.65
+                        :.72+wave*.72
+                )*
+                clamp(p.k,.8,1.22);
+
+            ctx.globalAlpha=alpha;
 
             ctx.fillRect(
                 p.x-size*.5,
@@ -1831,8 +1710,123 @@ function drawOrbit(
                 size,
                 size
             );
+
+            if(front&&i%23===0){
+                const d=size*(5.5+wave*2);
+
+                ctx.globalAlpha=alpha*.28;
+
+                ctx.drawImage(
+                    glowWhite,
+                    p.x-d*.5,
+                    p.y-d*.5,
+                    d,
+                    d
+                );
+            }
         }
     }
+}
+
+function drawOrbit(front,state,seconds,centerY){
+    if(state.ring<=.002)return;
+
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.lineCap="round";
+    ctx.lineJoin="round";
+
+    const depth=front?1:.28;
+
+    const glowColors=[
+        "#ff4fa3",
+        "#ff79bd",
+        "#bd72ff"
+    ];
+
+    const middleColors=[
+        "#ff9dca",
+        "#ffc1dc",
+        "#dbaaff"
+    ];
+
+    const coreColors=[
+        "#fff4f9",
+        "#fff9fc",
+        "#f8efff"
+    ];
+
+    for(let strand=0;strand<3;strand++){
+        traceOrbit(front,strand);
+
+        ctx.setLineDash([]);
+        ctx.globalAlpha=
+            state.ring*
+            depth*
+            (front?.105:.072);
+
+        ctx.strokeStyle=glowColors[strand];
+        ctx.lineWidth=front?9.5-strand*.8:5.4;
+        ctx.shadowColor=glowColors[strand];
+        ctx.shadowBlur=24;
+        ctx.stroke();
+
+        traceOrbit(front,strand);
+
+        ctx.globalAlpha=
+            state.ring*
+            depth*
+            (front?.34:.22);
+
+        ctx.strokeStyle=middleColors[strand];
+        ctx.lineWidth=front?2.8-strand*.25:1.45;
+        ctx.shadowColor=glowColors[strand];
+        ctx.shadowBlur=10;
+        ctx.stroke();
+
+        traceOrbit(front,strand);
+
+        ctx.globalAlpha=
+            state.ring*
+            depth*
+            (front?.82:.43);
+
+        ctx.strokeStyle=coreColors[strand];
+        ctx.lineWidth=front?.76:.48;
+        ctx.shadowBlur=5;
+        ctx.stroke();
+
+        traceOrbit(front,strand);
+
+        ctx.setLineDash([
+            heartUnit*(.085+strand*.012),
+            heartUnit*(.19-strand*.015)
+        ]);
+
+        ctx.lineDashOffset=
+            -seconds*
+            heartUnit*
+            (.29+strand*.045);
+
+        ctx.globalAlpha=
+            state.ring*
+            depth*
+            (front?.88:.32);
+
+        ctx.strokeStyle="#ffffff";
+        ctx.lineWidth=front?1.35:.68;
+        ctx.shadowColor=middleColors[strand];
+        ctx.shadowBlur=9;
+        ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
+    drawRibbonParticles(
+        front,
+        state,
+        seconds,
+        centerY
+    );
 
     ctx.restore();
 }
@@ -1912,19 +1906,13 @@ function drawHeartParticles(
         );
 
         const oscillation=Math.sin(
-            seconds*
-            (1.05+p.twinkle*.11)+
+            seconds*(1.05+p.twinkle*.11)+
             p.phase
         );
 
-        let x;
-        let y;
-        let z;
+        let x,y,z;
 
-        if(
-            kind==="inside"||
-            kind==="lower"
-        ){
+        if(kind==="inside"||kind==="lower"){
             x=c.x*p.radius+p.jx;
 
             y=
@@ -1942,21 +1930,27 @@ function drawHeartParticles(
 
             z=
                 p.z+
-                oscillation*
-                p.zWobble;
+                oscillation*p.zWobble;
         }else{
             const offset=
                 p.offset+
-                oscillation*
-                p.wobble;
+                oscillation*p.wobble;
 
-            x=c.x+c.nx*offset;
-            y=c.y+c.ny*offset;
+            const shapeScale=p.shapeScale||1;
+
+            x=
+                c.x*shapeScale+
+                c.nx*offset;
+
+            y=
+                (c.y+.055)*
+                shapeScale-
+                .055+
+                c.ny*offset;
 
             z=
                 p.z+
-                oscillation*
-                p.zWobble;
+                oscillation*p.zWobble;
         }
 
         if(state.burst>.001){
@@ -1991,24 +1985,30 @@ function drawHeartParticles(
             .24*Math.pow(
                 .5+
                 .5*Math.sin(
-                    seconds*
-                    p.twinkle+
+                    seconds*p.twinkle+
                     p.phase
                 ),
                 2
             );
 
+        const depthLight=clamp(
+            .78+q.z*.24,
+            .52,
+            1.18
+        );
+
         const alpha=clamp(
             p.alpha*
             gain*
             twinkle*
+            depthLight*
             (1+state.flash*.55)
         );
 
         const size=
             p.size*
             (.84+.16*state.zoom)*
-            clamp(q.k,.78,1.24);
+            clamp(q.k,.76,1.27);
 
         ctx.globalAlpha=alpha;
 
@@ -2027,11 +2027,7 @@ function drawHeartParticles(
 
             const diameter=
                 size*
-                rndFrame(
-                    p.phase,
-                    4.8,
-                    8.2
-                )*
+                rndFrame(p.phase,4.8,8.2)*
                 (1+state.flash*.36);
 
             ctx.globalAlpha=
@@ -2049,11 +2045,7 @@ function drawHeartParticles(
     }
 }
 
-function drawFlowStreaks(
-    state,
-    seconds,
-    centerY
-){
+function drawFlowStreaks(state,seconds,centerY){
     ctx.save();
     ctx.globalCompositeOperation="lighter";
     ctx.beginPath();
@@ -2065,8 +2057,7 @@ function drawFlowStreaks(
         let c=sampleCurve(u);
 
         const wave=Math.sin(
-            seconds*
-            (1.05+p.twinkle*.11)+
+            seconds*(1.05+p.twinkle*.11)+
             p.phase
         );
 
@@ -2074,9 +2065,21 @@ function drawFlowStreaks(
             p.offset+
             wave*p.wobble;
 
+        const shapeScale=p.shapeScale||1;
+
+        const x=
+            c.x*shapeScale+
+            c.nx*offset;
+
+        const y=
+            (c.y+.055)*
+            shapeScale-
+            .055+
+            c.ny*offset;
+
         const a=projectHeart(
-            c.x+c.nx*offset,
-            c.y+c.ny*offset,
+            x,
+            y,
             p.z+wave*p.zWobble,
             state,
             centerY
@@ -2088,16 +2091,12 @@ function drawFlowStreaks(
         c=sampleCurve(
             u-
             .0045-
-            rndFrame(
-                p.phase,
-                .001,
-                .004
-            )
+            rndFrame(p.phase,.001,.004)
         );
 
         const b=projectHeart(
-            c.x+c.nx*offset,
-            c.y+c.ny*offset,
+            c.x*shapeScale+c.nx*offset,
+            (c.y+.055)*shapeScale-.055+c.ny*offset,
             p.z,
             state,
             centerY
@@ -2107,10 +2106,7 @@ function drawFlowStreaks(
         ctx.lineTo(ax,ay);
     }
 
-    ctx.globalAlpha=
-        .28+
-        state.flash*.18;
-
+    ctx.globalAlpha=.28+state.flash*.18;
     ctx.strokeStyle="#ffe2ef";
     ctx.lineWidth=.72;
     ctx.lineCap="round";
@@ -2143,14 +2139,11 @@ function drawSparkles(
         );
 
         const wave=Math.sin(
-            seconds*
-            (1.05+p.twinkle*.11)+
+            seconds*(1.05+p.twinkle*.11)+
             p.phase
         );
 
-        let x;
-        let y;
-        let z;
+        let x,y,z;
 
         if(kind==="lower"){
             x=
@@ -2166,20 +2159,25 @@ function drawSparkles(
                 .025*(1-p.radius)+
                 c.ny*p.offset;
 
-            z=
-                p.z+
-                wave*p.zWobble;
+            z=p.z+wave*p.zWobble;
         }else{
             const offset=
                 p.offset+
                 wave*p.wobble;
 
-            x=c.x+c.nx*offset;
-            y=c.y+c.ny*offset;
+            const shapeScale=p.shapeScale||1;
 
-            z=
-                p.z+
-                wave*p.zWobble;
+            x=
+                c.x*shapeScale+
+                c.nx*offset;
+
+            y=
+                (c.y+.055)*
+                shapeScale-
+                .055+
+                c.ny*offset;
+
+            z=p.z+wave*p.zWobble;
         }
 
         const q=projectHeart(
@@ -2193,8 +2191,7 @@ function drawSparkles(
         const twinkle=Math.pow(
             .5+
             .5*Math.sin(
-                seconds*
-                p.twinkle+
+                seconds*p.twinkle+
                 p.phase
             ),
             5
@@ -2236,9 +2233,7 @@ function rndFrame(seed,a,b){
         (b-a)*
         (
             .5+
-            .5*Math.sin(
-                seed*12.9898
-            )
+            .5*Math.sin(seed*12.9898)
         )
     );
 }
@@ -2254,10 +2249,7 @@ function drawDebris(state,centerY){
         const p=debris[i];
 
         const q=clamp(
-            (
-                state.burstProgress-
-                p.delay
-            )/
+            (state.burstProgress-p.delay)/
             (1-p.delay)
         );
 
@@ -2270,10 +2262,7 @@ function drawDebris(state,centerY){
         const distance=
             heartUnit*
             state.zoom*
-            (
-                p.start+
-                p.speed*travel
-            );
+            (p.start+p.speed*travel);
 
         const angle=
             p.angle+
@@ -2291,8 +2280,7 @@ function drawDebris(state,centerY){
             state.burst*
             (1-q*.58);
 
-        ctx.globalAlpha=
-            p.alpha*fade;
+        ctx.globalAlpha=p.alpha*fade;
 
         ctx.fillRect(
             x-p.size*.5,
@@ -2362,6 +2350,14 @@ function render(now){
     drawRays(state,centerY);
     drawFlare(state,centerY,false);
     drawLensFlare(state,centerY);
+
+    if(state.ring>.002){
+        buildRibbonFrame(
+            state,
+            seconds,
+            centerY
+        );
+    }
 
     drawOrbit(
         false,
@@ -2511,3 +2507,4 @@ requestAnimationFrame(render);
 </script>
 </body>
 </html>
+```
