@@ -12,7 +12,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 </style>
 </head>
 <body>
-<canvas id="love" aria-label="旋转的粉色粒子爱心与花瓣"></canvas>
+<canvas id="love"></canvas>
 
 <script>
 (()=>{
@@ -24,23 +24,23 @@ const TAU=Math.PI*2;
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,t)=>a+(b-a)*t;
 const fract=v=>v-Math.floor(v);
+
 const ease=v=>{
     v=clamp(v);
     return v*v*v*(v*(v*6-15)+10);
 };
 
 const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
-const query=new URLSearchParams(location.search);
-const still=query.has("still")?Number(query.get("still")):null;
-const fixedYaw=query.has("angle")?Number(query.get("angle")):null;
 
 let seed=0x249fad;
 
 function random(){
     seed|=0;
     seed=seed+0x6D2B79F5|0;
+
     let t=Math.imul(seed^seed>>>15,1|seed);
     t=t+Math.imul(t^t>>>7,61|t)^t;
+
     return((t^t>>>14)>>>0)/4294967296;
 }
 
@@ -48,11 +48,11 @@ const rand=(a,b)=>a+(b-a)*random();
 const gauss=()=>random()+random()+random()+random()-2;
 
 const palette=[
-    "#e78cb6",
-    "#f3afd0",
-    "#ffcee5",
-    "#fff0f5",
-    "#c6addb"
+    "#ff5fa9",
+    "#ff82bd",
+    "#ffadd5",
+    "#ffe0ee",
+    "#d88bc8"
 ];
 
 const sprites=palette.map(color=>{
@@ -62,10 +62,12 @@ const sprites=palette.map(color=>{
     const g=c.getContext("2d");
     const r=g.createRadialGradient(20,20,0,20,20,20);
 
-    r.addColorStop(0,"#fff8fb");
-    r.addColorStop(.14,color);
-    r.addColorStop(.34,color+"e6");
-    r.addColorStop(.55,color+"28");
+    r.addColorStop(0,"#fff7fb");
+    r.addColorStop(.06,"#ffd6eb");
+    r.addColorStop(.22,color);
+    r.addColorStop(.46,color+"ee");
+    r.addColorStop(.64,color+"7a");
+    r.addColorStop(.82,color+"10");
     r.addColorStop(1,color+"00");
 
     g.fillStyle=r;
@@ -74,7 +76,6 @@ const sprites=palette.map(color=>{
     return c;
 });
 
-/* GPU 批量绘制；不支持 WebGL 时回退到 Canvas。 */
 const gpu=(()=>{
     const layer=document.createElement("canvas");
     let gl;
@@ -91,36 +92,37 @@ const gpu=(()=>{
 
     if(!gl)return null;
 
-    function program(vs,fs){
-        const p=gl.createProgram();
+    function createProgram(vsSource,fsSource){
+        const program=gl.createProgram();
 
         for(const [type,source] of [
-            [gl.VERTEX_SHADER,vs],
-            [gl.FRAGMENT_SHADER,fs]
+            [gl.VERTEX_SHADER,vsSource],
+            [gl.FRAGMENT_SHADER,fsSource]
         ]){
-            const s=gl.createShader(type);
-            gl.shaderSource(s,source);
-            gl.compileShader(s);
+            const shader=gl.createShader(type);
 
-            if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
-                throw Error(gl.getShaderInfoLog(s));
+            gl.shaderSource(shader,source);
+            gl.compileShader(shader);
+
+            if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)){
+                throw new Error(gl.getShaderInfoLog(shader));
             }
 
-            gl.attachShader(p,s);
-            gl.deleteShader(s);
+            gl.attachShader(program,shader);
+            gl.deleteShader(shader);
         }
 
-        gl.linkProgram(p);
+        gl.linkProgram(program);
 
-        if(!gl.getProgramParameter(p,gl.LINK_STATUS)){
-            throw Error(gl.getProgramInfoLog(p));
+        if(!gl.getProgramParameter(program,gl.LINK_STATUS)){
+            throw new Error(gl.getProgramInfoLog(program));
         }
 
-        return p;
+        return program;
     }
 
     try{
-        const point=program(`
+        const pointProgram=createProgram(`
             attribute vec4 a_point;
             attribute float a_alpha;
 
@@ -132,10 +134,11 @@ const gpu=(()=>{
 
             void main(){
                 gl_Position=vec4(
-                    a_point.xy/u_size*vec2(2.,-2.)+vec2(-1.,1.),
-                    0.,
-                    1.
+                    a_point.xy/u_size*vec2(2.0,-2.0)+vec2(-1.0,1.0),
+                    0.0,
+                    1.0
                 );
+
                 gl_PointSize=a_point.z*u_dpr;
                 v_index=a_point.w;
                 v_alpha=a_alpha;
@@ -149,34 +152,38 @@ const gpu=(()=>{
             varying mediump float v_alpha;
 
             void main(){
-                vec4 c=texture2D(
+                vec4 color=texture2D(
                     u_atlas,
                     vec2(
-                        (gl_PointCoord.x+v_index)/5.,
+                        (gl_PointCoord.x+v_index)/5.0,
                         gl_PointCoord.y
                     )
                 );
-                gl_FragColor=vec4(c.rgb,c.a*v_alpha);
+
+                gl_FragColor=vec4(color.rgb,color.a*v_alpha);
             }
         `);
 
-        const line=program(`
+        const lineProgram=createProgram(`
             attribute vec2 a_xy;
             attribute vec4 a_color;
 
             uniform vec2 u_size;
+
             varying mediump vec4 v_color;
 
             void main(){
                 gl_Position=vec4(
-                    a_xy/u_size*vec2(2.,-2.)+vec2(-1.,1.),
-                    0.,
-                    1.
+                    a_xy/u_size*vec2(2.0,-2.0)+vec2(-1.0,1.0),
+                    0.0,
+                    1.0
                 );
+
                 v_color=a_color;
             }
         `,`
             precision mediump float;
+
             varying mediump vec4 v_color;
 
             void main(){
@@ -184,11 +191,11 @@ const gpu=(()=>{
             }
         `);
 
-        const bg=program(`
+        const backgroundProgram=createProgram(`
             attribute vec2 a_xy;
 
             void main(){
-                gl_Position=vec4(a_xy,0.,1.);
+                gl_Position=vec4(a_xy,0.0,1.0);
             }
         `,`
             precision mediump float;
@@ -198,27 +205,27 @@ const gpu=(()=>{
             uniform float u_dpr;
 
             void main(){
-                vec2 p=vec2(
+                vec2 point=vec2(
                     gl_FragCoord.x/u_dpr,
                     u_size.y-gl_FragCoord.y/u_dpr
                 );
 
-                float r=clamp(
-                    length(p-u_center)/(max(u_size.x,u_size.y)*.69),
-                    0.,
-                    1.
+                float radius=clamp(
+                    length(point-u_center)/
+                    (max(u_size.x,u_size.y)*0.69),
+                    0.0,
+                    1.0
                 );
 
-                vec3 a=vec3(32.,23.,40.)/255.;
-                vec3 b=vec3(16.,14.,25.)/255.;
-                vec3 c=vec3(3.,4.,8.)/255.;
+                vec3 inner=vec3(36.0,24.0,42.0)/255.0;
+                vec3 middle=vec3(17.0,13.0,25.0)/255.0;
+                vec3 outer=vec3(3.0,4.0,8.0)/255.0;
 
-                gl_FragColor=vec4(
-                    r<.38
-                        ?mix(a,b,r/.38)
-                        :mix(b,c,(r-.38)/.62),
-                    1.
-                );
+                vec3 color=radius<0.38
+                    ?mix(inner,middle,radius/0.38)
+                    :mix(middle,outer,(radius-0.38)/0.62);
+
+                gl_FragColor=vec4(color,1.0);
             }
         `);
 
@@ -226,115 +233,252 @@ const gpu=(()=>{
         atlas.width=200;
         atlas.height=40;
 
-        const ac=atlas.getContext("2d");
-        sprites.forEach((s,i)=>ac.drawImage(s,i*40,0));
+        const atlasCtx=atlas.getContext("2d");
+
+        sprites.forEach((sprite,index)=>{
+            atlasCtx.drawImage(sprite,index*40,0);
+        });
 
         const texture=gl.createTexture();
+
         gl.bindTexture(gl.TEXTURE_2D,texture);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+        gl.texParameteri(
+            gl.TEXTURE_2D,
+            gl.TEXTURE_MIN_FILTER,
+            gl.LINEAR
+        );
+        gl.texParameteri(
+            gl.TEXTURE_2D,
+            gl.TEXTURE_MAG_FILTER,
+            gl.LINEAR
+        );
+        gl.texParameteri(
+            gl.TEXTURE_2D,
+            gl.TEXTURE_WRAP_S,
+            gl.CLAMP_TO_EDGE
+        );
+        gl.texParameteri(
+            gl.TEXTURE_2D,
+            gl.TEXTURE_WRAP_T,
+            gl.CLAMP_TO_EDGE
+        );
         gl.texImage2D(
-            gl.TEXTURE_2D,0,gl.RGBA,
-            gl.RGBA,gl.UNSIGNED_BYTE,atlas
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            atlas
         );
 
-        const pb=gl.createBuffer();
-        const lb=gl.createBuffer();
-        const bb=gl.createBuffer();
+        const pointBuffer=gl.createBuffer();
+        const lineBuffer=gl.createBuffer();
+        const backgroundBuffer=gl.createBuffer();
 
-        gl.bindBuffer(gl.ARRAY_BUFFER,bb);
+        gl.bindBuffer(gl.ARRAY_BUFFER,backgroundBuffer);
         gl.bufferData(
             gl.ARRAY_BUFFER,
             new Float32Array([-1,-1,3,-1,-1,3]),
             gl.STATIC_DRAW
         );
 
-        const points=new Float32Array(40000*5);
-        const lines=new Float32Array(36000*6);
+        const pointData=new Float32Array(40000*5);
+        const lineData=new Float32Array(36000*6);
 
-        let pn=0;
-        let ln=0;
+        let pointLength=0;
+        let lineLength=0;
 
-        const colors=new Map();
+        const colorCache=new Map();
 
-        const attribute=(p,name,n,stride,offset)=>{
-            const a=gl.getAttribLocation(p,name);
-            gl.enableVertexAttribArray(a);
-            gl.vertexAttribPointer(a,n,gl.FLOAT,false,stride,offset);
-            return a;
-        };
+        function attribute(program,name,size,stride,offset){
+            const location=gl.getAttribLocation(program,name);
 
-        const uniform=(p,name,...v)=>{
-            const u=gl.getUniformLocation(p,name);
-            v.length===2
-                ?gl.uniform2f(u,...v)
-                :gl.uniform1f(u,v[0]);
-        };
+            gl.enableVertexAttribArray(location);
+            gl.vertexAttribPointer(
+                location,
+                size,
+                gl.FLOAT,
+                false,
+                stride,
+                offset
+            );
+
+            return location;
+        }
+
+        function uniform(program,name,...values){
+            const location=gl.getUniformLocation(program,name);
+
+            if(values.length===2){
+                gl.uniform2f(location,...values);
+            }else{
+                gl.uniform1f(location,values[0]);
+            }
+        }
+
+        function flush(){
+            if(lineLength){
+                gl.useProgram(lineProgram);
+                gl.bindBuffer(gl.ARRAY_BUFFER,lineBuffer);
+                gl.bufferData(
+                    gl.ARRAY_BUFFER,
+                    lineData.subarray(0,lineLength),
+                    gl.DYNAMIC_DRAW
+                );
+
+                const xy=attribute(
+                    lineProgram,
+                    "a_xy",
+                    2,
+                    24,
+                    0
+                );
+
+                const color=attribute(
+                    lineProgram,
+                    "a_color",
+                    4,
+                    24,
+                    8
+                );
+
+                uniform(lineProgram,"u_size",W,H);
+
+                gl.drawArrays(
+                    gl.TRIANGLES,
+                    0,
+                    lineLength/6
+                );
+
+                gl.disableVertexAttribArray(xy);
+                gl.disableVertexAttribArray(color);
+
+                lineLength=0;
+            }
+
+            if(pointLength){
+                gl.useProgram(pointProgram);
+                gl.bindBuffer(gl.ARRAY_BUFFER,pointBuffer);
+                gl.bufferData(
+                    gl.ARRAY_BUFFER,
+                    pointData.subarray(0,pointLength),
+                    gl.DYNAMIC_DRAW
+                );
+
+                const point=attribute(
+                    pointProgram,
+                    "a_point",
+                    4,
+                    20,
+                    0
+                );
+
+                const alpha=attribute(
+                    pointProgram,
+                    "a_alpha",
+                    1,
+                    20,
+                    16
+                );
+
+                uniform(pointProgram,"u_size",W,H);
+                uniform(pointProgram,"u_dpr",DPR);
+
+                gl.drawArrays(
+                    gl.POINTS,
+                    0,
+                    pointLength/5
+                );
+
+                gl.disableVertexAttribArray(point);
+                gl.disableVertexAttribArray(alpha);
+
+                pointLength=0;
+            }
+        }
 
         layer.id="love";
-        layer.setAttribute("aria-label",canvas.getAttribute("aria-label"));
         canvas.replaceWith(layer);
         canvas=layer;
 
         return{
             begin(){
-                pn=ln=0;
+                pointLength=0;
+                lineLength=0;
 
                 gl.viewport(0,0,canvas.width,canvas.height);
                 gl.disable(gl.BLEND);
 
-                gl.useProgram(bg);
-                gl.bindBuffer(gl.ARRAY_BUFFER,bb);
+                gl.useProgram(backgroundProgram);
+                gl.bindBuffer(
+                    gl.ARRAY_BUFFER,
+                    backgroundBuffer
+                );
 
-                const a=attribute(bg,"a_xy",2,0,0);
+                const position=attribute(
+                    backgroundProgram,
+                    "a_xy",
+                    2,
+                    0,
+                    0
+                );
 
-                uniform(bg,"u_size",W,H);
-                uniform(bg,"u_center",CX,CY);
-                uniform(bg,"u_dpr",DPR);
+                uniform(backgroundProgram,"u_size",W,H);
+                uniform(backgroundProgram,"u_center",CX,CY);
+                uniform(backgroundProgram,"u_dpr",DPR);
 
                 gl.drawArrays(gl.TRIANGLES,0,3);
-                gl.disableVertexAttribArray(a);
+                gl.disableVertexAttribArray(position);
 
                 gl.enable(gl.BLEND);
                 gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
             },
 
             dot(x,y,size,alpha,color){
-                if(pn+5>points.length)return;
+                if(pointLength+5>pointData.length)return;
 
-                points[pn++]=x;
-                points[pn++]=y;
-                points[pn++]=Math.max(2,size*5.8);
-                points[pn++]=color;
-                points[pn++]=clamp(alpha);
+                pointData[pointLength++]=x;
+                pointData[pointLength++]=y;
+                pointData[pointLength++]=Math.max(
+                    1.5,
+                    size*4.6
+                );
+                pointData[pointLength++]=color;
+                pointData[pointLength++]=clamp(alpha);
             },
 
             line(x1,y1,x2,y2,width,alpha,color){
-                if(ln+36>lines.length)return;
+                if(lineLength+36>lineData.length)return;
 
-                let rgb=colors.get(color);
+                let rgb=colorCache.get(color);
 
                 if(!rgb){
                     rgb=[1,3,5].map(
-                        i=>parseInt(color.slice(i,i+2),16)/255
+                        i=>parseInt(
+                            color.slice(i,i+2),
+                            16
+                        )/255
                     );
-                    colors.set(color,rgb);
+
+                    colorCache.set(color,rgb);
                 }
 
-                const length=Math.hypot(x2-x1,y2-y1)||1;
+                const length=Math.hypot(
+                    x2-x1,
+                    y2-y1
+                )||1;
+
                 const dx=-(y2-y1)/length*width/2;
                 const dy=(x2-x1)/length*width/2;
 
-                const vertex=(x,y)=>{
-                    lines[ln++]=x;
-                    lines[ln++]=y;
-                    lines[ln++]=rgb[0];
-                    lines[ln++]=rgb[1];
-                    lines[ln++]=rgb[2];
-                    lines[ln++]=clamp(alpha);
-                };
+                function vertex(x,y){
+                    lineData[lineLength++]=x;
+                    lineData[lineLength++]=y;
+                    lineData[lineLength++]=rgb[0];
+                    lineData[lineLength++]=rgb[1];
+                    lineData[lineLength++]=rgb[2];
+                    lineData[lineLength++]=clamp(alpha);
+                }
 
                 vertex(x1+dx,y1+dy);
                 vertex(x1-dx,y1-dy);
@@ -345,45 +489,11 @@ const gpu=(()=>{
                 vertex(x2-dx,y2-dy);
             },
 
-            end(){
-                gl.useProgram(point);
-                gl.bindBuffer(gl.ARRAY_BUFFER,pb);
-                gl.bufferData(
-                    gl.ARRAY_BUFFER,
-                    points.subarray(0,pn),
-                    gl.DYNAMIC_DRAW
-                );
-
-                const a=attribute(point,"a_point",4,20,0);
-                const b=attribute(point,"a_alpha",1,20,16);
-
-                uniform(point,"u_size",W,H);
-                uniform(point,"u_dpr",DPR);
-
-                gl.drawArrays(gl.POINTS,0,pn/5);
-                gl.disableVertexAttribArray(a);
-                gl.disableVertexAttribArray(b);
-
-                gl.useProgram(line);
-                gl.bindBuffer(gl.ARRAY_BUFFER,lb);
-                gl.bufferData(
-                    gl.ARRAY_BUFFER,
-                    lines.subarray(0,ln),
-                    gl.DYNAMIC_DRAW
-                );
-
-                const c=attribute(line,"a_xy",2,24,0);
-                const d=attribute(line,"a_color",4,24,8);
-
-                uniform(line,"u_size",W,H);
-
-                gl.drawArrays(gl.TRIANGLES,0,ln/6);
-                gl.disableVertexAttribArray(c);
-                gl.disableVertexAttribArray(d);
-            }
+            flush,
+            end:flush
         };
     }catch(e){
-        console.warn("Using Canvas fallback",e);
+        console.warn("Canvas fallback",e);
         return null;
     }
 })();
@@ -392,7 +502,10 @@ function stroke(x1,y1,x2,y2,width,alpha,color){
     if(alpha<.003)return;
 
     if(gpu){
-        gpu.line(x1,y1,x2,y2,width,alpha,color);
+        gpu.line(
+            x1,y1,x2,y2,
+            width,alpha,color
+        );
         return;
     }
 
@@ -405,12 +518,11 @@ function stroke(x1,y1,x2,y2,width,alpha,color){
     ctx.stroke();
 }
 
-/* 常用心形曲线，保留完整轮廓。 */
 function heart(t){
-    const s=Math.sin(t);
+    const sin=Math.sin(t);
 
     return{
-        x:s*s*s,
+        x:sin*sin*sin,
         y:(
             13*Math.cos(t)
             -5*Math.cos(2*t)
@@ -421,105 +533,152 @@ function heart(t){
     };
 }
 
-/* 连续厚度场：前后曲面在轮廓处自然闭合。 */
-const G=137;
+const GRID=137;
 const SPAN=2.18;
 const MIN=-SPAN/2;
-const STEP=SPAN/(G-1);
+const STEP=SPAN/(GRID-1);
 
-const field=new Float32Array(G*G);
+const field=new Float32Array(GRID*GRID);
+
 const boundary=Array.from(
     {length:1200},
     (_,i)=>heart(i/1200*TAU)
 );
+
 const interior=[];
 
-for(let j=1;j<G-1;j++){
-    const y=MIN+j*STEP;
-    const cross=[];
+for(let row=1;row<GRID-1;row++){
+    const y=MIN+row*STEP;
+    const intersections=[];
 
     for(let i=0;i<boundary.length;i++){
         const a=boundary[i];
         const b=boundary[(i+1)%boundary.length];
 
         if((a.y>y)!==(b.y>y)){
-            cross.push(a.x+(y-a.y)*(b.x-a.x)/(b.y-a.y));
+            intersections.push(
+                a.x+
+                (y-a.y)*(b.x-a.x)/(b.y-a.y)
+            );
         }
     }
 
-    cross.sort((a,b)=>a-b);
+    intersections.sort((a,b)=>a-b);
 
-    for(let k=0;k+1<cross.length;k+=2){
-        for(let i=1;i<G-1;i++){
-            const x=MIN+i*STEP;
+    for(
+        let pair=0;
+        pair+1<intersections.length;
+        pair+=2
+    ){
+        for(let column=1;column<GRID-1;column++){
+            const x=MIN+column*STEP;
 
-            if(x>cross[k]&&x<cross[k+1]){
-                interior.push(j*G+i);
+            if(
+                x>intersections[pair]&&
+                x<intersections[pair+1]
+            ){
+                interior.push(row*GRID+column);
             }
         }
     }
 }
 
 for(let pass=0;pass<460;pass++){
-    for(const n of interior){
-        const q=(
-            field[n-1]+field[n+1]
-            +field[n-G]+field[n+G]
-            +STEP*STEP
+    for(const index of interior){
+        const next=(
+            field[index-1]+
+            field[index+1]+
+            field[index-GRID]+
+            field[index+GRID]+
+            STEP*STEP
         )*.25;
 
-        field[n]+=1.78*(q-field[n]);
+        field[index]+=1.78*(next-field[index]);
     }
 }
 
 let fieldMax=0;
 
-for(const n of interior){
-    fieldMax=Math.max(fieldMax,field[n]);
+for(const index of interior){
+    fieldMax=Math.max(fieldMax,field[index]);
 }
 
-for(const n of interior){
-    field[n]=.37*Math.sqrt(Math.max(0,field[n])/fieldMax);
+for(const index of interior){
+    field[index]=.37*Math.sqrt(
+        Math.max(0,field[index])/fieldMax
+    );
 }
 
 function height(x,y){
     const fx=(x-MIN)/STEP;
     const fy=(y-MIN)/STEP;
-    const i=Math.floor(fx);
-    const j=Math.floor(fy);
 
-    if(i<0||j<0||i>=G-1||j>=G-1)return 0;
+    const column=Math.floor(fx);
+    const row=Math.floor(fy);
 
-    const u=fx-i;
-    const v=fy-j;
-    const n=j*G+i;
+    if(
+        column<0||
+        row<0||
+        column>=GRID-1||
+        row>=GRID-1
+    ){
+        return 0;
+    }
+
+    const u=fx-column;
+    const v=fy-row;
+    const index=row*GRID+column;
 
     return lerp(
-        lerp(field[n],field[n+1],u),
-        lerp(field[n+G],field[n+G+1],u),
+        lerp(
+            field[index],
+            field[index+1],
+            u
+        ),
+        lerp(
+            field[index+GRID],
+            field[index+GRID+1],
+            u
+        ),
         v
     );
 }
 
 function surface(x,y,side){
     const h=height(x,y);
-    const e=STEP*.65;
+    const offset=STEP*.65;
 
-    const hx=(height(x+e,y)-height(x-e,y))/(2*e);
-    const hy=(height(x,y+e)-height(x,y-e))/(2*e);
-    const k=1/Math.hypot(hx,hy,1);
+    const dx=(
+        height(x+offset,y)-
+        height(x-offset,y)
+    )/(offset*2);
+
+    const dy=(
+        height(x,y+offset)-
+        height(x,y-offset)
+    )/(offset*2);
+
+    const normalScale=1/Math.hypot(dx,dy,1);
 
     return{
-        x,y,
+        x,
+        y,
         z:h*side,
-        nx:-hx*k,
-        ny:-hy*k,
-        nz:side*k
+        nx:-dx*normalScale,
+        ny:-dy*normalScale,
+        nz:side*normalScale
     };
 }
 
-let W=0,H=0,DPR=1;
-let S=1,CX=0,CY=0,FY=0,FR=1;
+let W=0;
+let H=0;
+let DPR=1;
+
+let S=1;
+let CX=0;
+let CY=0;
+let FY=0;
+let FR=1;
 
 let heartDots=[];
 let petals=[];
@@ -529,49 +688,101 @@ let bursts=[];
 let profile="";
 let background=null;
 
-const buckets=Array.from({length:24},()=>[]);
+const buckets=Array.from(
+    {length:24},
+    ()=>[]
+);
+
 const state={};
 
 function makeHeart(mobile){
     seed=0x249fad;
     heartDots=[];
 
-    const count=mobile?9600:18000;
+    const count=mobile?7600:15200;
 
     while(heartDots.length<count){
-        const n=interior[Math.floor(random()*interior.length)];
+        const index=interior[
+            Math.floor(random()*interior.length)
+        ];
 
-        const x=MIN+(n%G+rand(-.48,.48))*STEP;
-        const y=MIN+(Math.floor(n/G)+rand(-.48,.48))*STEP;
+        const x=MIN+(
+            index%GRID+
+            rand(-.48,.48)
+        )*STEP;
+
+        const y=MIN+(
+            Math.floor(index/GRID)+
+            rand(-.48,.48)
+        )*STEP;
+
         const h=height(x,y);
 
         if(h<.007)continue;
 
-        const p=surface(x,y,random()<.5?-1:1);
+        const density=
+            .24+
+            .76*Math.pow(
+                1-clamp(h/.37),
+                2
+            );
+
+        if(random()>density)continue;
+
+        const point=surface(
+            x,y,
+            random()<.5?-1:1
+        );
 
         if(
             random()>
-            Math.min(1,.30/Math.max(.08,Math.abs(p.nz)))
-        )continue;
+            Math.min(
+                1,
+                .30/Math.max(
+                    .08,
+                    Math.abs(point.nz)
+                )
+            )
+        ){
+            continue;
+        }
 
-        const dust=random()<.14;
-        const volume=!dust&&random()<.12;
-        const displacement=dust?rand(.02,.115):gauss()*.009;
+        const dust=random()<.19;
+        const volume=!dust&&random()<.10;
 
-        p.x+=p.nx*displacement;
-        p.y+=p.ny*displacement;
-        p.z+=p.nz*displacement;
+        const displacement=dust
+            ?rand(.02,.115)
+            :gauss()*.009;
 
-        if(volume)p.z*=rand(.08,.90);
+        point.x+=point.nx*displacement;
+        point.y+=point.ny*displacement;
+        point.z+=point.nz*displacement;
 
-        Object.assign(p,{
+        if(volume){
+            point.z*=rand(.08,.90);
+        }
+
+        Object.assign(point,{
             kind:volume?2:dust?1:0,
-            size:random()<.07?rand(1.65,2.35):rand(.62,1.52),
-            alpha:rand(.55,1),
+
+            size:random()<.065
+                ?rand(1.35,1.95)
+                :rand(.55,1.32),
+
+            alpha:rand(.55,.98),
             phase:rand(0,TAU),
             speed:rand(.75,1.65),
-            color:random()<.13?3:random()<.68?2:1,
-            hot:random()<.018,
+
+            color:random()<.05
+                ?3
+                :random()<.72
+                    ?1
+                    :random()<.88
+                        ?2
+                        :0,
+
+            hot:random()<.015,
+
             px:0,
             py:0,
             screenSize:1,
@@ -579,7 +790,7 @@ function makeHeart(mobile){
             tint:0
         });
 
-        heartDots.push(p);
+        heartDots.push(point);
     }
 }
 
@@ -596,13 +807,16 @@ function makeScene(mobile){
 
         for(let petal=0;petal<count;petal++){
             for(let side=-1;side<=1;side+=2){
-                for(let j=0;j<steps;j++){
+                for(let i=0;i<steps;i++){
                     petals.push({
-                        layer,petal,count,side,
-                        u:(j+.5)/steps,
+                        layer,
+                        petal,
+                        count,
+                        side,
+                        u:(i+.5)/steps,
                         phase:rand(0,TAU),
                         size:rand(.48,1),
-                        a:rand(.4,.86)
+                        alpha:rand(.4,.86)
                     });
                 }
             }
@@ -613,19 +827,19 @@ function makeScene(mobile){
         stars.push({
             x:random(),
             y:random(),
-            a:rand(.03,.23),
-            s:rand(.4,1.2),
-            p:rand(0,TAU)
+            alpha:rand(.03,.23),
+            size:rand(.4,1.2),
+            phase:rand(0,TAU)
         });
     }
 
     for(let i=0;i<(mobile?150:250);i++){
         bursts.push({
-            a:rand(0,TAU),
-            r:rand(.3,.95),
+            angle:rand(0,TAU),
+            radius:rand(.3,.95),
             speed:rand(.65,2.2),
-            p:random(),
-            s:rand(.5,1.3)
+            brightness:random(),
+            size:rand(.5,1.3)
         });
     }
 }
@@ -641,50 +855,68 @@ function resize(){
     ctx.setTransform(DPR,0,0,DPR,0,0);
 
     CX=W/2;
-    FY=H*(W<700?.64:.72);
-    S=Math.min(W*(W<700?.34:.305),H*.235,290);
+    FY=H*(W<700?.64:.76);
+
+    S=Math.min(
+        W*(W<700?.34:.32),
+        H*(W<700?.235:.30),
+        300
+    );
+
     CY=FY-S*1.12;
     FR=Math.min(W*.455,S*1.85);
 
     background=ctx.createRadialGradient(
         CX,CY,0,
-        CX,CY,Math.max(W,H)*.69
+        CX,CY,
+        Math.max(W,H)*.69
     );
 
-    background.addColorStop(0,"#201728");
-    background.addColorStop(.38,"#100e19");
+    background.addColorStop(0,"#24182a");
+    background.addColorStop(.38,"#110d19");
     background.addColorStop(1,"#030408");
 
-    const p=W<700?"m":"d";
+    const nextProfile=W<700?"mobile":"desktop";
 
-    if(p!==profile){
-        profile=p;
-        makeScene(p==="m");
+    if(nextProfile!==profile){
+        profile=nextProfile;
+        makeScene(profile==="mobile");
     }
 }
 
-function scene(t){
-    const u=t%15;
+function scene(time){
+    const local=time%15;
 
     let yaw=0;
     let zoom=1;
 
-    if(u<4.4){
-        yaw=TAU*ease(u/4.4);
-    }else if(u<8.5){
-        yaw=TAU+
-            .10*Math.sin((u-4.4)*.9)
-            *Math.sin((u-4.4)/4.1*Math.PI);
+    if(local<4.4){
+        yaw=TAU*ease(local/4.4);
+    }else if(local<8.5){
+        yaw=
+            TAU+
+            .10*Math.sin((local-4.4)*.9)*
+            Math.sin((local-4.4)/4.1*Math.PI);
     }else{
-        yaw=TAU+TAU*ease((u-8.5)/6.5);
+        yaw=
+            TAU+
+            TAU*ease((local-8.5)/6.5);
     }
 
-    if(u>7.6&&u<9){
-        zoom=lerp(1,.77,ease((u-7.6)/1.4));
-    }else if(u>=9&&u<11.2){
+    if(local>7.6&&local<9){
+        zoom=lerp(
+            1,
+            .77,
+            ease((local-7.6)/1.4)
+        );
+    }else if(local>=9&&local<11.2){
         zoom=.77;
-    }else if(u>=11.2){
-        zoom=lerp(.77,1,ease((u-11.2)/2.2));
+    }else if(local>=11.2){
+        zoom=lerp(
+            .77,
+            1,
+            ease((local-11.2)/2.2)
+        );
     }
 
     if(reduce){
@@ -692,98 +924,209 @@ function scene(t){
         zoom=1;
     }
 
-    if(Number.isFinite(fixedYaw))yaw=fixedYaw;
+    const pitch=
+        -.055+
+        .038*Math.sin(time*.37);
 
-    const pitch=-.055+.038*Math.sin(t*.37);
-    const roll=.022*Math.sin(t*.28);
+    const roll=
+        .022*Math.sin(time*.28);
 
     Object.assign(state,{
-        yaw,zoom,
-        c:Math.cos(yaw),
-        s:Math.sin(yaw),
-        cp:Math.cos(pitch),
-        sp:Math.sin(pitch),
-        cr:Math.cos(roll),
-        sr:Math.sin(roll),
+        yaw,
+        zoom,
 
-        ring:1-.86
-            *ease((u-4)/.8)
-            *(1-ease((u-8.8)/.9)),
+        cosYaw:Math.cos(yaw),
+        sinYaw:Math.sin(yaw),
 
-        burst:!reduce&&u>4.05&&u<6.25
-            ?(u-4.05)/2.2
-            :-1
+        cosPitch:Math.cos(pitch),
+        sinPitch:Math.sin(pitch),
+
+        cosRoll:Math.cos(roll),
+        sinRoll:Math.sin(roll),
+
+        ring:
+            1-
+            .86*
+            ease((local-4)/.8)*
+            (1-ease((local-8.8)/.9)),
+
+        burst:
+            !reduce&&local>4.05&&local<6.25
+                ?(local-4.05)/2.2
+                :-1
     });
 
     return state;
 }
 
-function rotate(x,y,z,q,out){
-    const a=x*q.c+z*q.s;
-    const b=-x*q.s+z*q.c;
-    const c=y*q.cp-b*q.sp;
-    const d=y*q.sp+b*q.cp;
+function rotate(x,y,z,state,out){
+    const yawX=
+        x*state.cosYaw+
+        z*state.sinYaw;
 
-    out[0]=a*q.cr-c*q.sr;
-    out[1]=a*q.sr+c*q.cr;
-    out[2]=d;
+    const yawZ=
+        -x*state.sinYaw+
+        z*state.cosYaw;
+
+    const pitchY=
+        y*state.cosPitch-
+        yawZ*state.sinPitch;
+
+    const pitchZ=
+        y*state.sinPitch+
+        yawZ*state.cosPitch;
+
+    out[0]=
+        yawX*state.cosRoll-
+        pitchY*state.sinRoll;
+
+    out[1]=
+        yawX*state.sinRoll+
+        pitchY*state.cosRoll;
+
+    out[2]=pitchZ;
 }
 
-const pos=new Float32Array(3);
+const position=new Float32Array(3);
 const normal=new Float32Array(3);
 
-function prepareHeart(t,q){
-    for(const b of buckets)b.length=0;
+function prepareHeart(time,state){
+    for(const bucket of buckets){
+        bucket.length=0;
+    }
 
-    const cy=FY-S*(.18+.94*q.zoom);
+    const centerY=
+        FY-
+        S*(.18+.94*state.zoom);
 
-    for(const p of heartDots){
-        const drift=.005*Math.sin(t*.8+p.phase);
+    for(const point of heartDots){
+        const normalDrift=
+            .006*Math.sin(
+                time*.86+
+                point.phase
+            );
+
+        const wanderX=
+            .0038*Math.sin(
+                time*point.speed*.55+
+                point.phase*1.7
+            );
+
+        const wanderY=
+            .0038*Math.cos(
+                time*point.speed*.47+
+                point.phase*1.3
+            );
 
         rotate(
-            p.x+p.nx*drift,
-            p.y+p.ny*drift,
-            p.z+p.nz*drift,
-            q,pos
+            point.x+
+                point.nx*normalDrift+
+                wanderX,
+
+            point.y+
+                point.ny*normalDrift+
+                wanderY,
+
+            point.z+
+                point.nz*normalDrift,
+
+            state,
+            position
         );
 
-        rotate(p.nx,p.ny,p.nz,q,normal);
+        rotate(
+            point.nx,
+            point.ny,
+            point.nz,
+            state,
+            normal
+        );
 
-        const k=5.5/(5.5-pos[2]);
-        const nz=normal[2];
-        const rim=Math.pow(1-Math.abs(nz),.62);
+        const perspective=
+            5.5/(5.5-position[2]);
+
+        const normalZ=normal[2];
+
+        const rim=Math.pow(
+            1-Math.abs(normalZ),
+            .62
+        );
 
         const lighting=Math.max(
             0,
-            -normal[0]*.36+normal[1]*.48+nz*.8
+            -normal[0]*.36+
+            normal[1]*.48+
+            normalZ*.8
         );
 
-        const facing=.42+.58*ease((nz+.15)/.3);
-        let alpha=(.035+2.2*rim+.09*lighting)*facing;
+        const facing=
+            .42+
+            .58*ease(
+                (normalZ+.15)/.3
+            );
 
-        if(p.kind===1)alpha*=.38;
-        if(p.kind===2)alpha=.055;
+        let alpha=(
+            .028+
+            1.72*rim+
+            .08*lighting
+        )*facing;
 
-        const flicker=.74+.26*Math.pow(
-            .5+.5*Math.sin(t*p.speed+p.phase),
-            3
+        if(point.kind===1){
+            alpha*=.42;
+        }
+
+        if(point.kind===2){
+            alpha=.043;
+        }
+
+        const flicker=
+            .74+
+            .26*Math.pow(
+                .5+
+                .5*Math.sin(
+                    time*point.speed+
+                    point.phase
+                ),
+                3
+            );
+
+        point.opacity=clamp(
+            alpha*
+            point.alpha*
+            flicker*
+            (.82+position[2]*.16)*
+            (.55+.45*Math.abs(state.cosYaw))
         );
 
-        p.opacity=clamp(
-            alpha*p.alpha*flicker
-            *(.82+pos[2]*.16)
-            *(.55+.45*Math.abs(q.c))
+        point.px=
+            CX+
+            position[0]*
+            S*
+            state.zoom*
+            perspective;
+
+        point.py=
+            centerY-
+            position[1]*
+            S*
+            state.zoom*
+            perspective;
+
+        point.screenSize=
+            point.size*
+            perspective*
+            Math.max(.78,S/220)*
+            state.zoom;
+
+        point.tint=point.hot?3:point.color;
+
+        const bucketIndex=clamp(
+            Math.floor((position[2]+1.5)*8),
+            0,
+            23
         );
 
-        p.px=CX+pos[0]*S*q.zoom*k;
-        p.py=cy-pos[1]*S*q.zoom*k;
-
-        p.screenSize=p.size*k*Math.max(.78,S/220)*q.zoom;
-        p.tint=rim>.91?3:p.color;
-
-        buckets[
-            clamp(Math.floor((pos[2]+1.5)*8),0,23)
-        ].push(p);
+        buckets[bucketIndex].push(point);
     }
 }
 
@@ -795,37 +1138,73 @@ function dot(x,y,size,alpha,color=2){
         return;
     }
 
-    const d=Math.max(2,size*5.8);
+    const diameter=Math.max(
+        1.5,
+        size*4.6
+    );
 
     ctx.globalAlpha=clamp(alpha);
-    ctx.drawImage(sprites[color],x-d/2,y-d/2,d,d);
+
+    ctx.drawImage(
+        sprites[color],
+        x-diameter/2,
+        y-diameter/2,
+        diameter,
+        diameter
+    );
 }
 
-function drawHeart(t){
+function drawHeart(time){
     ctx.globalCompositeOperation="lighter";
 
     for(const bucket of buckets){
-        for(const p of bucket){
-            dot(p.px,p.py,p.screenSize,p.opacity,p.tint);
+        for(const point of bucket){
+            dot(
+                point.px,
+                point.py,
+                point.screenSize,
+                point.opacity,
+                point.tint
+            );
 
-            if(p.hot&&p.opacity>.15){
+            if(point.hot&&point.opacity>.15){
                 const shine=Math.pow(
-                    .5+.5*Math.sin(t*1.6+p.phase),
+                    .5+
+                    .5*Math.sin(
+                        time*1.6+
+                        point.phase
+                    ),
                     14
                 );
 
                 if(shine>.22){
-                    const r=p.screenSize*(2.5+shine*3.5);
-                    const a=shine*p.opacity*.6;
+                    const radius=
+                        point.screenSize*
+                        (2.5+shine*3.5);
+
+                    const alpha=
+                        shine*
+                        point.opacity*
+                        .6;
 
                     stroke(
-                        p.px-r,p.py,p.px+r,p.py,
-                        .6,a,"#ffedf7"
+                        point.px-radius,
+                        point.py,
+                        point.px+radius,
+                        point.py,
+                        .6,
+                        alpha,
+                        "#ffedf7"
                     );
 
                     stroke(
-                        p.px,p.py-r,p.px,p.py+r,
-                        .6,a,"#ffedf7"
+                        point.px,
+                        point.py-radius,
+                        point.px,
+                        point.py+radius,
+                        .6,
+                        alpha,
+                        "#ffedf7"
                     );
                 }
             }
@@ -833,234 +1212,476 @@ function drawHeart(t){
     }
 }
 
-function flower(t){
+function drawFlower(time){
     ctx.globalCompositeOperation="lighter";
 
-    for(const p of petals){
-        const u=p.u;
-        const l=p.layer;
+    for(const point of petals){
+        const u=point.u;
+        const layer=point.layer;
 
-        const angle=p.petal/p.count*TAU
-            +(l?.08:0)
-            +t*(l?-.024:.017);
+        const angle=
+            point.petal/point.count*TAU+
+            (layer?.08:0)+
+            time*(layer?-.024:.017);
 
-        const open=1+.035*Math.sin(t*.6+p.petal*.27);
+        const wave=Math.sin(
+            time*1.05-
+            u*3.6+
+            point.petal*.31+
+            point.side*.55
+        );
+
+        const opening=
+            1+
+            .045*Math.sin(
+                time*.68+
+                point.petal*.27
+            )+
+            wave*.018;
 
         const radius=(
-            .045+Math.sin(u*Math.PI/2)*(l?.65:1)
-        )*open;
+            .045+
+            Math.sin(u*Math.PI/2)*
+            (layer?.65:1)
+        )*opening;
 
-        const width=Math.pow(
-            Math.sin(Math.PI*u),
-            1.25
-        )*(l?.075:.05);
+        const width=
+            Math.pow(
+                Math.sin(Math.PI*u),
+                1.25
+            )*
+            (layer?.075:.05)*
+            (1+wave*.15);
 
-        const sideways=p.side*width;
-        const curl=.035*Math.sin(t*.5+p.petal*.41)*u*u;
-        const a=angle+curl;
+        const sideways=point.side*width;
 
-        const x=Math.cos(a)*radius-Math.sin(a)*sideways;
-        const z=Math.sin(a)*radius+Math.cos(a)*sideways;
+        const curl=(
+            .038*Math.sin(
+                time*.58+
+                point.petal*.41
+            )+
+            wave*.018
+        )*u*u;
 
-        const lift=Math.sin(Math.PI*u)*(
-            .085+.035*Math.sin(t*.6+p.petal*.41)
-        );
+        const finalAngle=angle+curl;
 
-        const k=1/(1-z*.15);
-        const px=CX+x*FR*k;
-        const py=FY+z*FR*.28*k-lift*FR*.22;
+        const x=
+            Math.cos(finalAngle)*radius-
+            Math.sin(finalAngle)*sideways;
 
-        const shimmer=.65+.35*Math.pow(
-            .5+.5*Math.sin(t*1.2+p.phase),
-            2
-        );
+        const z=
+            Math.sin(finalAngle)*radius+
+            Math.cos(finalAngle)*sideways;
+
+        const lift=
+            Math.sin(Math.PI*u)*
+            (
+                .085+
+                .035*Math.sin(
+                    time*.66+
+                    point.petal*.41
+                )+
+                wave*.018
+            );
+
+        const perspective=1/(1-z*.15);
+
+        const px=
+            CX+
+            x*FR*perspective;
+
+        const py=
+            FY+
+            z*FR*.28*perspective-
+            lift*FR*.22;
+
+        const shimmer=
+            .65+
+            .35*Math.pow(
+                .5+
+                .5*Math.sin(
+                    time*1.2+
+                    point.phase
+                ),
+                2
+            );
 
         dot(
-            px,py,
-            p.size*(.65+FR/520)*.83,
-            p.a*shimmer*(.49+z*.13),
-            l?1:2
+            px,
+            py,
+            point.size*(.65+FR/520)*.83,
+            point.alpha*
+                shimmer*
+                (.49+z*.13),
+            layer?1:2
         );
     }
 
     for(let ring=0;ring<6;ring++){
-        const r=.035+ring*.038;
-        const n=70+ring*14;
+        const radius=.035+ring*.038;
+        const count=70+ring*14;
 
-        for(let j=0;j<n;j++){
-            const a=j/n*TAU+t*(ring%2?.07:-.05);
+        for(let i=0;i<count;i++){
+            const angle=
+                i/count*TAU+
+                time*(ring%2?.07:-.05);
 
             dot(
-                CX+Math.cos(a)*r*FR,
-                FY+Math.sin(a)*r*FR*.28,
-                .48,.38,3
+                CX+
+                    Math.cos(angle)*
+                    radius*
+                    FR,
+
+                FY+
+                    Math.sin(angle)*
+                    radius*
+                    FR*
+                    .28,
+
+                .48,
+                .38,
+                3
             );
         }
     }
 }
 
-const bands=[
+const ribbonSettings=[
     {
         turns:2.1,
-        top:1.02,bottom:-.90,
-        radius:1.18,tilt:.16,
-        phase:.1,speed:.23,dir:1
+        top:1.02,
+        bottom:-.90,
+        radius:1.18,
+        tilt:.16,
+        phase:.1,
+        speed:.23,
+        direction:1
     },
     {
         turns:1.08,
-        top:.66,bottom:-.20,
-        radius:1.26,tilt:-.38,
-        phase:2.4,speed:.34,dir:-1
+        top:.66,
+        bottom:-.20,
+        radius:1.26,
+        tilt:-.38,
+        phase:2.4,
+        speed:.34,
+        direction:-1
     },
     {
         turns:.87,
-        top:.06,bottom:-.86,
-        radius:1.31,tilt:.29,
-        phase:4.1,speed:.28,dir:1
+        top:.06,
+        bottom:-.86,
+        radius:1.31,
+        tilt:.29,
+        phase:4.1,
+        speed:.28,
+        direction:1
     }
 ];
 
-const trail=Array.from(
+const ribbonPoints=Array.from(
     {length:3},
     ()=>Array.from(
         {length:300},
-        ()=>({x:0,y:0,z:0,u:0})
+        ()=>({
+            x:0,
+            y:0,
+            z:0,
+            u:0
+        })
     )
 );
 
-function prepareRibbons(t,q){
-    const cy=FY-S*(.18+.94*q.zoom);
+function prepareRibbons(time,state){
+    const centerY=
+        FY-
+        S*(.18+.94*state.zoom);
 
-    for(let j=0;j<bands.length;j++){
-        const b=bands[j];
+    for(let ribbon=0;ribbon<ribbonSettings.length;ribbon++){
+        const settings=ribbonSettings[ribbon];
 
         for(let i=0;i<300;i++){
             const u=i/299;
-            const e=Math.sin(Math.PI*u);
-            const a=u*TAU*b.turns*b.dir+t*b.speed+b.phase;
+            const envelope=Math.sin(Math.PI*u);
+
+            const angle=
+                u*
+                TAU*
+                settings.turns*
+                settings.direction+
+                time*settings.speed+
+                settings.phase;
 
             const flutter=
-                .09*Math.sin(a*1.7-t*.8+j)
-                +.035*Math.sin(a*3.1+t*1.1);
+                .12*Math.sin(
+                    angle*1.7-
+                    time*.9+
+                    ribbon
+                )+
+                .046*Math.sin(
+                    angle*3.1+
+                    time*1.18
+                );
 
-            const r=b.radius+.08*Math.sin(a*1.35+t*.45+j);
-            const x=Math.cos(a+flutter*e)*r;
-            const z=Math.sin(a+flutter*e)*r;
+            const radius=
+                settings.radius+
+                .10*Math.sin(
+                    angle*1.35+
+                    time*.52+
+                    ribbon
+                )+
+                .025*Math.sin(
+                    time*1.3-
+                    u*11+
+                    ribbon
+                );
 
-            const y=lerp(b.top,b.bottom,u)
-                +b.tilt*Math.sin(a+.5)*e
-                +.07*Math.sin(t*.7+a*2)*e;
+            const twist=
+                angle+
+                flutter*envelope+
+                .07*Math.sin(
+                    time*.53+
+                    ribbon*1.9
+                )*envelope;
 
-            const k=5.5/(5.5-z);
-            const p=trail[j][i];
+            const offsetX=
+                .095*Math.sin(
+                    angle*.47+
+                    time*.31+
+                    ribbon*2.1
+                )*envelope;
 
-            p.x=CX+x*S*q.zoom*k;
-            p.y=cy-y*S*q.zoom*k;
-            p.z=z;
-            p.u=u;
+            const offsetZ=
+                .075*Math.sin(
+                    angle*.63-
+                    time*.37+
+                    ribbon*.8
+                )*envelope;
+
+            const x=
+                offsetX+
+                Math.cos(twist)*radius;
+
+            const z=
+                offsetZ+
+                Math.sin(twist)*radius;
+
+            const y=
+                lerp(
+                    settings.top,
+                    settings.bottom,
+                    u
+                )+
+                settings.tilt*
+                    Math.sin(angle+.5)*
+                    envelope+
+                .09*Math.sin(
+                    time*.83-
+                    u*9.2+
+                    ribbon*1.7
+                )*envelope+
+                .025*Math.sin(
+                    time*1.5+
+                    angle*2.3
+                )*envelope;
+
+            const perspective=
+                5.5/(5.5-z);
+
+            const point=ribbonPoints[ribbon][i];
+
+            point.x=
+                CX+
+                x*
+                S*
+                state.zoom*
+                perspective;
+
+            point.y=
+                centerY-
+                y*
+                S*
+                state.zoom*
+                perspective;
+
+            point.z=z;
+            point.u=u;
         }
     }
 }
 
-function ribbons(front,t,q){
+function drawRibbons(front,time,state){
     ctx.globalCompositeOperation="lighter";
     ctx.lineCap="round";
 
-    for(let j=0;j<3;j++){
-        const list=trail[j];
+    for(let ribbon=0;ribbon<3;ribbon++){
+        const points=ribbonPoints[ribbon];
 
-        for(let i=1;i<list.length;i++){
-            const a=list[i-1];
-            const b=list[i];
+        for(let i=1;i<points.length;i++){
+            const previous=points[i-1];
+            const current=points[i];
 
-            if((b.z>0)!==front)continue;
+            if((current.z>0)!==front)continue;
 
-            const taper=Math.pow(Math.sin(Math.PI*b.u),.45);
-
-            const wave=.48+.52*Math.pow(
-                .5+.5*Math.sin(b.u*19-t*(2+j*.34)+j),
-                3
+            const taper=Math.pow(
+                Math.sin(Math.PI*current.u),
+                .45
             );
 
-            const alpha=q.ring*taper*wave*(front?.54:.11);
+            const wave=
+                .48+
+                .52*Math.pow(
+                    .5+
+                    .5*Math.sin(
+                        current.u*19-
+                        time*(2+ribbon*.34)+
+                        ribbon
+                    ),
+                    3
+                );
+
+            const alpha=
+                state.ring*
+                taper*
+                wave*
+                (front?.54:.11);
 
             stroke(
-                a.x,a.y,b.x,b.y,
-                5.2,alpha*.17,
-                j===2?"#ddbddf":"#f5b5d5"
+                previous.x,
+                previous.y,
+                current.x,
+                current.y,
+                5.2,
+                alpha*.17,
+                ribbon===2
+                    ?"#ddbddf"
+                    :"#f5b5d5"
             );
 
             stroke(
-                a.x,a.y,b.x,b.y,
-                j===0?.88:.62,
+                previous.x,
+                previous.y,
+                current.x,
+                current.y,
+                ribbon===0?.88:.62,
                 alpha,
-                j===1?"#ffdfeb":"#ffd5e9"
+                ribbon===1
+                    ?"#ffdfeb"
+                    :"#ffd5e9"
             );
 
             if(i%3===0){
-                const spark=.5+.5*Math.sin(i*12.3+j*7);
+                const sparkle=
+                    .5+
+                    .5*Math.sin(
+                        i*12.3+
+                        ribbon*7
+                    );
 
                 dot(
-                    b.x+Math.sin(i*17.1)*2,
-                    b.y+Math.cos(i*9.3)*2,
-                    .45+spark*.35,
+                    current.x+
+                        Math.sin(i*17.1)*2,
+
+                    current.y+
+                        Math.cos(i*9.3)*2,
+
+                    .45+sparkle*.35,
                     alpha*.8,
-                    j===2?4:2
+                    ribbon===2?4:2
                 );
             }
         }
 
-        for(let c=0;c<2;c++){
-            const head=fract(t*(.11+j*.016)+c*.5+j*.18);
+        for(let comet=0;comet<2;comet++){
+            const head=fract(
+                time*(.16+ribbon*.023)+
+                comet*.5+
+                ribbon*.18
+            );
 
-            for(let n=0;n<18;n++){
-                const u=fract(head-n*.0025);
-                const p=list[Math.min(299,Math.floor(u*299))];
+            for(let tail=0;tail<18;tail++){
+                const u=fract(
+                    head-tail*.0025
+                );
 
-                if((p.z>0)!==front)continue;
+                const point=points[
+                    Math.min(
+                        299,
+                        Math.floor(u*299)
+                    )
+                ];
 
-                const a=Math.pow(1-n/18,2)
-                    *q.ring
-                    *(front?.80:.20)
-                    *Math.sin(Math.PI*u);
+                if((point.z>0)!==front)continue;
+
+                const alpha=
+                    Math.pow(
+                        1-tail/18,
+                        2
+                    )*
+                    state.ring*
+                    (front?.80:.20)*
+                    Math.sin(Math.PI*u);
 
                 dot(
-                    p.x,p.y,
-                    .75+(1-n/18)*.65,
-                    a,3
+                    point.x,
+                    point.y,
+                    .75+
+                        (1-tail/18)*.65,
+                    alpha,
+                    3
                 );
             }
         }
     }
 }
 
-function burst(q){
-    if(q.burst<0)return;
+function drawBurst(state){
+    if(state.burst<0)return;
 
-    const u=q.burst;
-    const fade=Math.sin(Math.PI*u)*Math.pow(1-u,.6);
-    const cy=FY-S*(.18+.94*q.zoom);
+    const progress=state.burst;
 
-    ctx.globalCompositeOperation="lighter";
+    const fade=
+        Math.sin(Math.PI*progress)*
+        Math.pow(1-progress,.6);
 
-    for(const p of bursts){
-        const r=(p.r+u*p.speed*2.3)*S;
-        const tail=r-(.025+.10*(1-u))*S;
-        const ca=Math.cos(p.a);
-        const sa=Math.sin(p.a);
+    const centerY=
+        FY-
+        S*(.18+.94*state.zoom);
+
+    for(const particle of bursts){
+        const radius=(
+            particle.radius+
+            progress*
+            particle.speed*
+            2.3
+        )*S;
+
+        const tail=
+            radius-
+            (.025+.10*(1-progress))*S;
+
+        const cos=Math.cos(particle.angle);
+        const sin=Math.sin(particle.angle);
 
         stroke(
-            CX+ca*tail,cy+sa*tail,
-            CX+ca*r,cy+sa*r,
+            CX+cos*tail,
+            centerY+sin*tail,
+            CX+cos*radius,
+            centerY+sin*radius,
             .7,
-            fade*(.16+p.p*.22),
-            p.p>.75?"#ffe7f0":"#f1a6cc"
+            fade*(
+                .16+
+                particle.brightness*.22
+            ),
+            particle.brightness>.75
+                ?"#ffe7f0"
+                :"#f1a6cc"
         );
 
         dot(
-            CX+ca*r,
-            cy+sa*r,
-            p.s,
+            CX+cos*radius,
+            centerY+sin*radius,
+            particle.size,
             fade*.38,
             2
         );
@@ -1071,16 +1692,19 @@ let seconds=0;
 let last=performance.now();
 
 function render(now){
-    const dt=Math.min(.05,Math.max(0,(now-last)/1000));
+    const delta=Math.min(
+        .05,
+        Math.max(0,(now-last)/1000)
+    );
+
     last=now;
 
-    if(!document.hidden)seconds+=dt;
+    if(!document.hidden){
+        seconds+=delta;
+    }
 
-    const t=Number.isFinite(still)
-        ?still
-        :reduce?5.7:seconds;
-
-    const q=scene(t);
+    const time=reduce?5.7:seconds;
+    const currentState=scene(time);
 
     if(gpu){
         gpu.begin();
@@ -1091,36 +1715,48 @@ function render(now){
         ctx.fillRect(0,0,W,H);
     }
 
-    for(const p of stars){
+    for(const star of stars){
         dot(
-            p.x*W,
-            p.y*H,
-            p.s,
-            p.a*(.6+.4*Math.sin(t*.45+p.p)**2),
+            star.x*W,
+            star.y*H,
+            star.size,
+            star.alpha*(
+                .6+
+                .4*Math.sin(
+                    time*.45+
+                    star.phase
+                )**2
+            ),
             4
         );
     }
 
-    flower(t);
+    drawFlower(time);
 
-    prepareRibbons(t,q);
-    ribbons(false,t,q);
+    if(gpu)gpu.flush();
 
-    burst(q);
+    prepareRibbons(time,currentState);
+    drawRibbons(false,time,currentState);
 
-    prepareHeart(t,q);
-    drawHeart(t);
+    if(gpu)gpu.flush();
 
-    ribbons(true,t,q);
+    drawBurst(currentState);
+
+    if(gpu)gpu.flush();
+
+    prepareHeart(time,currentState);
+    drawHeart(time);
+
+    if(gpu)gpu.flush();
+
+    drawRibbons(true,time,currentState);
+
+    if(gpu)gpu.end();
 
     ctx.globalAlpha=1;
     ctx.globalCompositeOperation="source-over";
 
-    if(gpu)gpu.end();
-
-    if(!Number.isFinite(still)){
-        requestAnimationFrame(render);
-    }
+    requestAnimationFrame(render);
 }
 
 addEventListener("resize",resize,{passive:true});
